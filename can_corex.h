@@ -167,8 +167,8 @@ struct CCX_instance_t
 };
 
 
-void CCX_RX_PushMsg(CCX_instance_t *Instance, uint32_t ID, uint8_t *Data, uint8_t DLC, uint8_t IDE_flag);
-void CCX_TX_PushMsg(CCX_instance_t *Instance, uint32_t ID, uint8_t *Data, uint8_t DLC, uint8_t IDE_flag);
+void CCX_RX_PushMsg(CCX_instance_t *Instance, uint32_t ID, const uint8_t *Data, uint8_t DLC, uint8_t IDE_flag);
+void CCX_TX_PushMsg(CCX_instance_t *Instance, uint32_t ID, const uint8_t *Data, uint8_t DLC, uint8_t IDE_flag);
 void CCX_Poll(CCX_instance_t *Instance);
 void CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t* CCX_RX_table, CCX_TX_table_t* CCX_TX_table, uint16_t RxTableSize,
 		uint16_t TxTableSize, void (*SendFunction)(const CCX_instance_t *Instance, const CCX_message_t *msg),
