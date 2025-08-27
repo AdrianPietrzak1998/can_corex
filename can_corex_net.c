@@ -158,7 +158,7 @@ void CCX_net_push(const CCX_instance_t* Instance, const CCX_message_t* msg)
 			{
 				for (uint16_t j = 0; j < CCX_MAX_INSTANCE_IN_NETWORK; j++)
 				{
-					if (Instance != net->NodeList[j].NodeInstance)
+					if ((Instance != net->NodeList[j].NodeInstance) && NULL != net->NodeList[j].NodeInstance)
 					{
 						switch(net->NodeList[j].NodeSettings.Replication)
 						{
