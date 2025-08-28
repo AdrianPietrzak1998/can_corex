@@ -37,7 +37,7 @@ void CCX_tick_variable_register(CCX_TIME_t *Variable)
 
 #endif
 
-extern void CCX_net_push(const CCX_instance_t* Instance, const CCX_message_t* msg);
+extern void CCX_net_push(const CCX_instance_t* Instance, const CCX_message_t* msg, uint8_t FromTxFunc);
 
 static inline void CopyBuf(const uint8_t *restrict src, uint8_t *restrict dst, size_t size)
 {
@@ -81,7 +81,7 @@ void CCX_RX_PushMsg(CCX_instance_t *Instance, uint32_t ID, const uint8_t *Data, 
         CopyBuf(Data, Instance->RxBuf[Instance->RxHead].Data, DLC);
     }
 
-    CCX_net_push(Instance, &Instance->RxBuf[Instance->RxHead]);
+    CCX_net_push(Instance, &Instance->RxBuf[Instance->RxHead], 0);
 }
 
 static inline CCX_MsgRegStatus_t CCX_RX_MsgFromTables(CCX_instance_t *Instance, CCX_message_t *Msg)
@@ -176,7 +176,7 @@ void CCX_TX_PushMsg(CCX_instance_t *Instance, uint32_t ID, const uint8_t *Data, 
         CopyBuf(Data, Instance->TxBuf[Instance->TxHead].Data, DLC);
     }
 
-    CCX_net_push(Instance, &Instance->TxBuf[Instance->TxHead]);
+    CCX_net_push(Instance, &Instance->TxBuf[Instance->TxHead], 1);
 }
 
 

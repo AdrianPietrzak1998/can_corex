@@ -22,13 +22,20 @@ typedef enum
 
 typedef enum
 {
-	CCX_NET_TX_REPLICATION = 0,
-	CCX_NET_TX_RX_REPLICATION,
+	CCX_NET_TX_REPLICATION = 0, /* If another node in the network receives a message, that node will only forward the message on its TX. */
+	CCX_NET_TX_RX_REPLICATION, /* If another node in the network receives a message, that node will forward it on its TX and also treat it as received by itself. */
 } CCX_net_replication_t;
+
+typedef enum
+{
+	CCX_NET_NODE_IN_NET = 0, /* Messages sent by this node reach the network as if it were connected to the network. */
+	CCX_NET_NODE_REPEATER, /* Messages sent by this node are transmitted only through the physical layer assigned to it and do not affect the network it is connected to, but the network also makes use of its physical layer. */
+} CCX_net_node_type_t;
 
 typedef struct
 {
 	CCX_net_replication_t Replication;
+	CCX_net_node_type_t NodeType;
 } CCX_net_node_settings_t;
 
 typedef struct

@@ -11,7 +11,7 @@
 
 CCX_net_t* CCX_nets = NULL;
 
-static CCX_net_status_t CCX_net_clear_nodes(CCX_net_t* net)
+CCX_net_status_t CCX_net_clear_nodes(CCX_net_t* net)
 {
 	if (NULL == net)
 	{
@@ -22,6 +22,7 @@ static CCX_net_status_t CCX_net_clear_nodes(CCX_net_t* net)
 	{
 		net->NodeList[i].NodeInstance = NULL;
 		net->NodeList[i].NodeSettings.Replication = CCX_NET_TX_REPLICATION;
+		net->NodeList[i].NodeSettings.NodeType = CCX_NET_NODE_IN_NET;
 	}
 
 	return CCX_NET_OK;
@@ -76,13 +77,6 @@ CCX_net_status_t CCX_net_init(CCX_net_t* net)
 	if (NULL == net)
 	{
 		return CCX_NET_NULL;
-	}
-
-	status = CCX_net_clear_nodes(net);
-
-	if (status != CCX_NET_OK)
-	{
-		return status;
 	}
 
 	if (CCX_nets == NULL)
@@ -142,7 +136,7 @@ CCX_net_status_t CCX_net_deinit(CCX_net_t* net)
     return CCX_NET_DOES_NOT_EXISTING;
 }
 
-void CCX_net_push(const CCX_instance_t* Instance, const CCX_message_t* msg)
+void CCX_net_push(const CCX_instance_t* Instance, const CCX_message_t* msg, uint8_t FromTxFunc)
 {
 	if (CCX_nets == NULL)
 	{
@@ -154,13 +148,13 @@ void CCX_net_push(const CCX_instance_t* Instance, const CCX_message_t* msg)
 	{
 		for (uint16_t i = 0; i < CCX_MAX_INSTANCE_IN_NETWORK; i++)
 		{
-			if (Instance == net->NodeList[i].NodeInstance)
+			if (Instance == net->NodeList[i].NodeInstance && (!FromTxFunc || (CCX_NET_NODE_IN_NET == net->NodeList[i].NodeSettings.NodeType)))
 			{
 				for (uint16_t j = 0; j < CCX_MAX_INSTANCE_IN_NETWORK; j++)
 				{
 					if ((Instance != net->NodeList[j].NodeInstance) && NULL != net->NodeList[j].NodeInstance)
 					{
-						switch(net->NodeList[j].NodeSettings.Replication)
+						switch (net->NodeList[j].NodeSettings.Replication)
 						{
 						case CCX_NET_TX_REPLICATION:
 							CCX_net_TX_PushMsg(net->NodeList[j].NodeInstance, msg);
