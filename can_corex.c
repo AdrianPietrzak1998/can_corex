@@ -8,6 +8,7 @@
 #include "can_corex.h"
 #include "assert.h"
 #include <stddef.h>
+#include "string.h"
 
 #if CCX_TICK_FROM_FUNC
 
@@ -54,7 +55,7 @@ static inline void CopyBuf(const uint8_t *restrict src, uint8_t *restrict dst, s
 
 
 
-void CCX_RX_PushMsg(CCX_instance_t *Instance, uint32_t ID, const uint8_t *Data, uint8_t DLC, uint8_t IDE_flag)
+void CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
 {
     assert(Instance != NULL);
 
@@ -71,15 +72,7 @@ void CCX_RX_PushMsg(CCX_instance_t *Instance, uint32_t ID, const uint8_t *Data, 
 
     Instance->RxHead = next_head;
 
-    Instance->RxBuf[Instance->RxHead].ID = ID;
-    Instance->RxBuf[Instance->RxHead].DLC = DLC;
-    Instance->RxBuf[Instance->RxHead].IDE_flag = IDE_flag;
-    Instance->RxReceivedTick[Instance->RxHead] = CCX_GET_TICK;
-
-    if ((DLC > 0) && (DLC <= 8))
-    {
-        CopyBuf(Data, Instance->RxBuf[Instance->RxHead].Data, DLC);
-    }
+    memcpy(&Instance->RxBuf[Instance->RxHead], msg, sizeof(CCX_message_t));
 
     CCX_net_push(Instance, &Instance->RxBuf[Instance->RxHead], 0);
 }
@@ -150,7 +143,7 @@ static inline void CCX_RX_Poll(CCX_instance_t *Instance)
 }
 
 
-void CCX_TX_PushMsg(CCX_instance_t *Instance, uint32_t ID, const uint8_t *Data, uint8_t DLC, uint8_t IDE_flag)
+void CCX_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
 {
     assert(Instance != NULL);
 
@@ -167,14 +160,7 @@ void CCX_TX_PushMsg(CCX_instance_t *Instance, uint32_t ID, const uint8_t *Data, 
 
     Instance->TxHead = next_head;
 
-    Instance->TxBuf[Instance->TxHead].ID = ID;
-    Instance->TxBuf[Instance->TxHead].DLC = DLC;
-    Instance->TxBuf[Instance->TxHead].IDE_flag = IDE_flag;
-
-    if ((DLC > 0) && (DLC <= 8))
-    {
-        CopyBuf(Data, Instance->TxBuf[Instance->TxHead].Data, DLC);
-    }
+    memcpy(&Instance->TxBuf[Instance->TxHead], msg, sizeof(CCX_message_t));
 
     CCX_net_push(Instance, &Instance->TxBuf[Instance->TxHead], 1);
 }
@@ -184,6 +170,7 @@ static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
 {
     assert(NULL != Instance);
     uint8_t Tmp[8];
+    memset(Tmp, 0x00, 8);
 
     for (uint16_t i = 0; i < Instance->TxTableSize; i++)
     {
@@ -195,8 +182,15 @@ static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
             {
                 Instance->CCX_TX_table[i].Parser(Instance, Tmp, i);
             }
-            CCX_TX_PushMsg(Instance, Instance->CCX_TX_table[i].ID, Tmp, Instance->CCX_TX_table[i].DLC,
-                          Instance->CCX_TX_table[i].IDE_flag);
+            CCX_message_t msg = {
+            		.ID = Instance->CCX_TX_table[i].ID,
+					.DLC = Instance->CCX_TX_table[i].DLC,
+					.IDE_flag = Instance->CCX_TX_table[i].IDE_flag
+            };
+
+            memcpy(msg.Data, Tmp, 8);
+
+            CCX_TX_PushMsg(Instance, &msg);
         }
     }
 }
