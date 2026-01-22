@@ -135,6 +135,7 @@ typedef struct
     uint8_t IDE_flag : 1;
     CCX_TIME_t TimeOut;
     void (*Parser)(const CCX_instance_t *Instance, CCX_message_t *Msg, uint16_t Slot);
+    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot);
     CCX_TIME_t LastTick;
 } CCX_RX_table_t;
 
@@ -163,7 +164,6 @@ struct CCX_instance_t
     CCX_RX_table_t *CCX_RX_table;
     CCX_TX_table_t *CCX_TX_table;
     uint16_t RxTableSize, TxTableSize;
-    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot);
     void (*Parser_unreg_msg)(const CCX_instance_t *Instance, CCX_message_t *Msg);
 };
 
@@ -174,7 +174,6 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
                       uint16_t RxTableSize, uint16_t TxTableSize,
                       void (*SendFunction)(const CCX_instance_t *Instance, const CCX_message_t *msg),
                       CCX_BusIsFree_t (*BusCheck)(const CCX_instance_t *Instance),
-                      void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot),
                       void (*ParserUnregMsg)(const CCX_instance_t *Instance, CCX_message_t *Msg));
 
 #if CCX_TICK_FROM_FUNC
