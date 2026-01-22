@@ -1,7 +1,7 @@
 # CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-2.0.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-1.1.0-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
 [![Tests](https://img.shields.io/badge/Tests-53%2F53%20passing-success.svg)]()
@@ -51,7 +51,6 @@ CCX_Status_t CCX_Init(
     uint16_t TxTableSize,
     void (*SendFunction)(const CCX_instance_t *Instance, const CCX_message_t *msg),
     CCX_BusIsFree_t (*BusCheck)(const CCX_instance_t *Instance),
-    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot),
     void (*ParserUnregMsg)(const CCX_instance_t *Instance, CCX_message_t *Msg)
 );
 ```
@@ -66,7 +65,6 @@ CCX_Status_t CCX_Init(
 - `TxTableSize`: Number of entries in TX table
 - `SendFunction`: Callback to physically send messages (required if TxTableSize > 0)
 - `BusCheck`: Callback to check if bus is free (required if TxTableSize > 0)
-- `TimeoutCallback`: Callback when RX timeout occurs (optional)
 - `ParserUnregMsg`: Callback for unregistered messages (optional)
 
 **Returns**:
@@ -285,6 +283,7 @@ typedef struct {
     void (*Parser)(const CCX_instance_t *Instance, 
                    CCX_message_t *Msg, 
                    uint16_t Slot);
+    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot);
     CCX_TIME_t LastTick;  // Last receive time (auto-managed)
 } CCX_RX_table_t;
 ```
@@ -293,6 +292,7 @@ typedef struct {
 - Define expected messages with ID, DLC, and IDE_flag
 - Set `TimeOut` to enable timeout detection (in ticks)
 - Provide `Parser` callback to process matched messages
+- Provide `TimeoutCallback` to handle timeout events (optional)
 - `LastTick` is automatically updated by library
 
 ---
@@ -358,7 +358,7 @@ int main(void) {
     
     // Initialize CAN CoreX
     CCX_Init(&can1, NULL, NULL, 0, 0, 
-             hw_send_can_message, hw_can_bus_check, NULL, NULL);
+             hw_send_can_message, hw_can_bus_check, NULL);
     
     while (1) {
         // Poll CAN library
@@ -409,15 +409,15 @@ CCX_RX_table_t rx_table[] = {
         .DLC = 2,
         .IDE_flag = 0,
         .TimeOut = 1000,  // 1000ms timeout
-        .Parser = parse_sensor_data
+        .Parser = parse_sensor_data,
+        .TimeoutCallback = sensor_timeout_handler
     }
 };
 
 // Initialize with RX table
 CCX_tick_variable_register(&system_tick_ms);
 CCX_Init(&can1, rx_table, NULL, 1, 0,
-         hw_send_can_message, hw_can_bus_check,
-         sensor_timeout_handler, NULL);
+         hw_send_can_message, hw_can_bus_check, NULL);
 ```
 
 ---
@@ -451,7 +451,7 @@ CCX_TX_table_t tx_table[] = {
 
 // Initialize with TX table
 CCX_Init(&can1, NULL, tx_table, 0, 1,
-         hw_send_can_message, hw_can_bus_check, NULL, NULL);
+         hw_send_can_message, hw_can_bus_check, NULL);
 
 // Heartbeat will be sent automatically by CCX_Poll()
 ```
@@ -468,8 +468,8 @@ CCX_instance_t can1, can2;
 CCX_net_t can_network;
 
 // Initialize both instances
-CCX_Init(&can1, NULL, NULL, 0, 0, hw_send_can1, hw_bus_check1, NULL, NULL);
-CCX_Init(&can2, NULL, NULL, 0, 0, hw_send_can2, hw_bus_check2, NULL, NULL);
+CCX_Init(&can1, NULL, NULL, 0, 0, hw_send_can1, hw_bus_check1, NULL);
+CCX_Init(&can2, NULL, NULL, 0, 0, hw_send_can2, hw_bus_check2, NULL);
 
 // Configure network
 can_network.NodeList[0].NodeInstance = &can1;
@@ -556,6 +556,7 @@ CCX_TX_table_t tx_table[] = {
 ```c
 // For safety-critical sensors, always enable timeout
 rx_table[0].TimeOut = 100;  // 100ms max between messages
+rx_table[0].TimeoutCallback = critical_sensor_timeout_handler;
 ```
 
 ### 7. Buffer Sizing
@@ -582,12 +583,12 @@ rx_table[0].TimeOut = 100;  // 100ms max between messages
 ### Poll Frequency
 
 - Call `CCX_Poll()` at least 2x faster than shortest timeout
-- Example: 100ms timeout → poll every 50ms or faster
+- Example: 100ms timeout â†’ poll every 50ms or faster
 
 ### Timeout Accuracy
 
 - Timeout triggers when: `current_tick - LastTick >= TimeOut`
-- Actual timeout = TimeOut ± poll_period
+- Actual timeout = TimeOut Â± poll_period
 - For 100ms timeout with 10ms poll: actual = 100-110ms
 
 ---
@@ -647,6 +648,12 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 - GitHub: [@AdrianPietrzak1998](https://github.com/AdrianPietrzak1998)
 
 ## Changelog
+
+### Current Release: v1.1.0 (2026-01-22)
+- **Per-message timeout callbacks**: `TimeoutCallback` moved from `CCX_instance_t` to `CCX_RX_table_t` for better flexibility
+- **API Change**: `CCX_Init()` parameter count reduced from 9 to 8 (removed global `TimeoutCallback` parameter)
+- **Documentation**: Updated all examples and best practices to reflect new timeout callback approach
+- **Performance**: Reduced overhead - timeout callbacks now only called when needed per message
 
 ### Previous Release: v1.0.0 (2025-04-26)
 - 🎉 Initial release

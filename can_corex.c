@@ -78,7 +78,7 @@ CCX_Status_t CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
     Instance->RxHead = next_head;
 
     memcpy(&Instance->RxBuf[Instance->RxHead], msg, sizeof(CCX_message_t));
-    Instance->RxReceivedTick[Instance->RxHead] = CCX_GET_TICK; /* FIXED: populate timestamp */
+    Instance->RxReceivedTick[Instance->RxHead] = CCX_GET_TICK;
 
     CCX_net_push(Instance, &Instance->RxBuf[Instance->RxHead], 0);
 
@@ -100,7 +100,7 @@ static inline CCX_MsgRegStatus_t CCX_RX_MsgFromTables(CCX_instance_t *Instance, 
         {
             if ((Instance->CCX_RX_table[i].DLC == Msg->DLC) && (Instance->CCX_RX_table[i].IDE_flag == Msg->IDE_flag))
             {
-                if (NULL != Instance->CCX_RX_table[i].Parser) /* FIXED: check before calling */
+                if (NULL != Instance->CCX_RX_table[i].Parser)
                 {
                     Instance->CCX_RX_table[i].Parser(Instance, Msg, i);
                 }
@@ -122,9 +122,9 @@ static inline void CCX_Timeout_Check(CCX_instance_t *Instance)
                 (CCX_GET_TICK - Instance->CCX_RX_table[i].LastTick >= Instance->CCX_RX_table[i].TimeOut))
             {
                 Instance->CCX_RX_table[i].LastTick = CCX_GET_TICK;
-                if (NULL != Instance->TimeoutCallback)
+                if (NULL != Instance->CCX_RX_table[i].TimeoutCallback)
                 {
-                    Instance->TimeoutCallback(Instance, i);
+                    Instance->CCX_RX_table[i].TimeoutCallback(Instance, i);
                 }
             }
         }
@@ -247,7 +247,6 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
                       uint16_t RxTableSize, uint16_t TxTableSize,
                       void (*SendFunction)(const CCX_instance_t *Instance, const CCX_message_t *msg),
                       CCX_BusIsFree_t (*BusCheck)(const CCX_instance_t *Instance),
-                      void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot),
                       void (*ParserUnregMsg)(const CCX_instance_t *Instance, CCX_message_t *Msg))
 {
     /* asserts here */
@@ -262,7 +261,6 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
     Instance->TxTableSize = TxTableSize;
     Instance->SendFunction = SendFunction;
     Instance->BusCheck = BusCheck;
-    Instance->TimeoutCallback = TimeoutCallback;
     Instance->Parser_unreg_msg = ParserUnregMsg;
 
     Instance->RxHead = 0;
