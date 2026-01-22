@@ -98,7 +98,19 @@ static inline CCX_MsgRegStatus_t CCX_RX_MsgFromTables(CCX_instance_t *Instance, 
     {
         if (Instance->CCX_RX_table[i].ID == Msg->ID)
         {
-            if ((Instance->CCX_RX_table[i].DLC == Msg->DLC) && (Instance->CCX_RX_table[i].IDE_flag == Msg->IDE_flag))
+            /* Check DLC: CCX_DLC_ANY accepts any DLC (0-8), otherwise exact match */
+            uint8_t dlc_match = 0;
+            if (Instance->CCX_RX_table[i].DLC == CCX_DLC_ANY)
+            {
+                dlc_match = 1;  /* Any DLC accepted */
+            }
+            else
+            {
+                dlc_match = (Instance->CCX_RX_table[i].DLC == Msg->DLC);  /* Exact match */
+            }
+            
+            if (dlc_match && (Instance->CCX_RX_table[i].IDE_flag == Msg->IDE_flag))
+
             {
                 if (NULL != Instance->CCX_RX_table[i].Parser)
                 {

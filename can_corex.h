@@ -40,6 +40,23 @@
  */
 #define CCX_TX_BUFFER_SIZE 48
 
+
+/**
+ * @def CCX_DLC_ANY
+ * @brief Special DLC value for wildcard matching in RX table.
+ *
+ * When this value is used in CCX_RX_table_t.DLC field, the parser will be called
+ * for any received DLC (0-8), regardless of the actual message DLC.
+ * This is useful for protocols that may send messages with variable DLC.
+ *
+ * Example:
+ * CCX_RX_table_t rx_table[] = {
+ *     {.ID = 0x100, .DLC = 8, .Parser = my_parser},        // Exact match: only DLC=8
+ *     {.ID = 0x200, .DLC = CCX_DLC_ANY, .Parser = my_parser} // Any DLC: 0-8
+ * };
+ */
+#define CCX_DLC_ANY 15
+
 /**
  * @brief System time base type and maximum timeout definition.
  *
