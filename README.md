@@ -1,17 +1,17 @@
 # CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-1.1.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-1.2.0-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-53%2F53%20passing-success.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-92%2F92%20passing-success.svg)]()
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
 
 
 ## Overview
 
-CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, and network replication capabilities.
+CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, and ISO-TP transport protocol capabilities.
 
 ## Table of Contents
 
@@ -20,7 +20,9 @@ CAN CoreX is a lightweight, modular CAN bus communication library designed for e
 3. [Error Codes](#error-codes)
 4. [Data Structures](#data-structures)
 5. [Usage Examples](#usage-examples)
-6. [Best Practices](#best-practices)
+6. [ISO-TP Transport Protocol](#iso-tp-transport-protocol)
+7. [Wildcard DLC Matching](#wildcard-dlc-matching)
+8. [Best Practices](#best-practices)
 
 ---
 
@@ -33,9 +35,10 @@ CAN CoreX is a lightweight, modular CAN bus communication library designed for e
 - **Periodic Transmission**: Automatic periodic message sending via TX tables
 - **Network Replication**: Multi-instance message routing and replication
 - **Timestamp Tracking**: Automatic message receive time recording
+- **ISO-TP Protocol**: ISO 15765-2 transport layer for multi-frame messages
+- **Wildcard Matching**: Accept any DLC with `CCX_DLC_ANY` in RX table
 
 ---
-
 ## API Reference
 
 ### Initialization and Configuration
@@ -488,6 +491,180 @@ CCX_net_init(&can_network);
 
 ---
 
+## ISO-TP Transport Protocol
+
+CAN CoreX includes ISO 15765-2 (ISO-TP) implementation for sending messages larger than 8 bytes over CAN.
+
+### Features
+
+- **Single Frame (SF)**: Messages up to 7 bytes
+- **Multi-Frame (FF + CF)**: Messages up to 4095 bytes with flow control
+- **Flow Control (FC)**: CTS/WAIT/OVFLW support
+- **Configurable Padding**: Optional padding for all frame types
+- **Timeout Monitoring**: N_As, N_Bs, N_Cs, N_Ar, N_Br, N_Cr timeouts
+- **Progress Callbacks**: Monitor reception progress for large transfers
+- **Separate TX/RX Instances**: Independent transmit and receive handling
+
+### Basic Usage
+
+```c
+#include "can_corex.h"
+#include "can_corex_isotp.h"
+
+// Initialize CAN CoreX
+CCX_instance_t can;
+CCX_tick_variable_register(&system_tick);
+
+// Create ISO-TP instances
+CCX_ISOTP_TX_t isotp_tx;
+CCX_ISOTP_RX_t isotp_rx;
+uint8_t rx_buffer[512];
+
+// RX table with ISO-TP parsers
+CCX_RX_table_t rx_table[] = {
+    CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x123),     // Receive data on 0x123
+    CCX_ISOTP_TX_FC_TABLE_ENTRY(&isotp_tx, 0x321)   // Receive FC on 0x321
+};
+
+CCX_Init(&can, rx_table, NULL, 2, 0, hw_send, hw_bus_check, NULL);
+
+// Configure ISO-TP TX
+CCX_ISOTP_TX_Config_t tx_cfg = {
+    .CanInstance = &can,
+    .TxID = 0x123,
+    .RxID_FC = 0x321,
+    .BS = 0,              // Block Size (0 = no limit)
+    .STmin = 10,          // Separation Time minimum (10ms)
+    .N_As = 1000,
+    .N_Bs = 1000,
+    .N_Cs = 1000,
+    .Padding = {.Enable = 1, .PaddingByte = 0xAA},
+    .OnTransmitComplete = tx_complete_callback,
+    .OnError = tx_error_callback
+};
+CCX_ISOTP_TX_Init(&isotp_tx, &tx_cfg);
+
+// Configure ISO-TP RX
+CCX_ISOTP_RX_Config_t rx_cfg = {
+    .CanInstance = &can,
+    .RxID = 0x123,
+    .TxID = 0x321,
+    .BS = 0,
+    .STmin = 10,
+    .N_Ar = 1000,
+    .N_Br = 1000,
+    .N_Cr = 1000,
+    .Padding = {.Enable = 0},  // FC without padding
+    .RxBuffer = rx_buffer,
+    .RxBufferSize = sizeof(rx_buffer),
+    .OnReceiveComplete = rx_complete_callback,
+    .OnError = rx_error_callback
+};
+CCX_ISOTP_RX_Init(&isotp_rx, &rx_cfg);
+
+// Transmit large message
+uint8_t data[200];
+CCX_ISOTP_Transmit(&isotp_tx, data, 200);
+
+// Main loop
+while (1) {
+    CCX_Poll(&can);              // Process CAN messages
+    CCX_ISOTP_TX_Poll(&isotp_tx); // Handle ISO-TP TX state machine
+    CCX_ISOTP_RX_Poll(&isotp_rx); // Handle ISO-TP RX timeouts
+}
+```
+
+### Flow Control Padding
+
+Flow Control frames respect the `Padding` configuration from RX:
+
+```c
+// With padding - FC will have DLC=8
+.Padding = {.Enable = 1, .PaddingByte = 0xAA}
+// Sends: [30 00 00 00 AA AA AA AA]
+
+// Without padding - FC will have DLC=4
+.Padding = {.Enable = 0}
+// Sends: [30 00 00 00]
+```
+
+Both variants work correctly thanks to `CCX_DLC_ANY` wildcard matching in the RX table macros.
+
+### Callbacks
+
+**TX Complete**:
+```c
+void tx_complete_callback(CCX_ISOTP_TX_t *Instance) {
+    printf("Transmission complete!\n");
+}
+```
+
+**RX Complete**:
+```c
+void rx_complete_callback(CCX_ISOTP_RX_t *Instance, const uint8_t *Data, uint16_t Length) {
+    printf("Received %d bytes\n", Length);
+    // Process received data
+}
+```
+
+**RX Progress** (optional):
+```c
+void rx_progress_callback(CCX_ISOTP_RX_t *Instance, uint16_t BytesReceived, uint16_t TotalLength) {
+    printf("Progress: %d/%d bytes\n", BytesReceived, TotalLength);
+}
+```
+
+### Limitations
+
+- **Normal addressing only**: Extended and Mixed addressing modes not yet implemented
+- **Single instance per parser**: Uses global pointers for TX/RX instances
+- **STmin < 1ms**: Submillisecond timing (0xF1-0xF9) parsed but not implemented
+
+---
+
+## Wildcard DLC Matching
+
+CAN CoreX supports wildcard DLC matching in RX tables using `CCX_DLC_ANY`.
+
+### Overview
+
+By default, RX table entries match exact DLC values. Using `CCX_DLC_ANY` allows accepting messages with any DLC (0-8):
+
+```c
+CCX_RX_table_t rx_table[] = {
+    // Exact match - only DLC=8
+    {.ID = 0x100, .DLC = 8, .IDE_flag = 0, .Parser = my_parser},
+    
+    // Wildcard - accepts any DLC (0-8)
+    {.ID = 0x200, .DLC = CCX_DLC_ANY, .IDE_flag = 0, .Parser = my_parser}
+};
+```
+
+### Use Cases
+
+1. **Higher-level protocols**: ISO-TP, J1939 where message DLC varies
+2. **Padding flexibility**: Accept messages with or without padding
+3. **Monitoring/debugging**: Capture all variants of a message ID
+4. **Protocol flexibility**: Handle different DLC configurations from various ECUs
+
+### Example
+
+```c
+CCX_message_t msg1 = {.ID = 0x200, .DLC = 3, .Data = {1, 2, 3}};
+CCX_message_t msg2 = {.ID = 0x200, .DLC = 8, .Data = {1, 2, 3, 4, 5, 6, 7, 8}};
+
+CCX_RX_PushMsg(&can, &msg1);  // Parser called (DLC=3 accepted)
+CCX_RX_PushMsg(&can, &msg2);  // Parser called (DLC=8 accepted)
+```
+
+### Important Notes
+
+- **Only `CCX_DLC_ANY` (value 15) works as wildcard**
+- DLC values 0-8 require exact match as usual
+- DLC values 9-14 are invalid and will be rejected
+- ISO-TP macros automatically use `CCX_DLC_ANY` for flexibility
+
+
 ## Best Practices
 
 ### 1. Always Register Tick Source First
@@ -636,6 +813,7 @@ void can_task(void *param) {
 3. **Timeout Range**: Limited by CCX_TIME_t type (default: uint32_t)
 4. **Not Thread-Safe**: Requires external synchronization in multi-threaded environments
 
+
 ---
 
 ## License
@@ -649,12 +827,24 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v1.1.0 (2026-01-22)
+### Current Release: v1.2.0 (202x-xx-xx)
+- **ISO-TP Protocol**: Full ISO 15765-2 transport layer implementation
+  - Single Frame and Multi-Frame support (up to 4095 bytes)
+  - Flow Control with CTS/WAIT/OVFLW
+  - Configurable padding and timeouts
+  - Progress callbacks for large transfers
+- **Wildcard DLC Matching**: `CCX_DLC_ANY` constant for accepting any DLC in RX table
+  - Enables flexible protocol handling (ISO-TP, J1939, etc.)
+  - Useful for messages with variable padding
+- **Updated Tests**: 92/92 tests passing (added ISO-TP test suite)
+
+### Previous Release: v1.1.0 (2026-01-22)
 - **Per-message timeout callbacks**: `TimeoutCallback` moved from `CCX_instance_t` to `CCX_RX_table_t` for better flexibility
 - **API Change**: `CCX_Init()` parameter count reduced from 9 to 8 (removed global `TimeoutCallback` parameter)
 - **Documentation**: Updated all examples and best practices to reflect new timeout callback approach
 - **Performance**: Reduced overhead - timeout callbacks now only called when needed per message
 
-### Previous Release: v1.0.0 (2025-04-26)
+### Initial Release: v1.0.0 (2025-04-26)
 - 🎉 Initial release
+
 ---
