@@ -102,13 +102,13 @@ static inline CCX_MsgRegStatus_t CCX_RX_MsgFromTables(CCX_instance_t *Instance, 
             uint8_t dlc_match = 0;
             if (Instance->CCX_RX_table[i].DLC == CCX_DLC_ANY)
             {
-                dlc_match = 1;  /* Any DLC accepted */
+                dlc_match = 1; /* Any DLC accepted */
             }
             else
             {
-                dlc_match = (Instance->CCX_RX_table[i].DLC == Msg->DLC);  /* Exact match */
+                dlc_match = (Instance->CCX_RX_table[i].DLC == Msg->DLC); /* Exact match */
             }
-            
+
             if (dlc_match && (Instance->CCX_RX_table[i].IDE_flag == Msg->IDE_flag))
 
             {
@@ -282,7 +282,11 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
 
     memset(Instance->RxBuf, 0, sizeof(Instance->RxBuf));
     memset(Instance->TxBuf, 0, sizeof(Instance->TxBuf));
-    memset(Instance->RxReceivedTick, 0, sizeof(Instance->RxReceivedTick));
+
+    for (uint16_t i = 0; i < CCX_RX_BUFFER_SIZE; i++)
+    {
+        Instance->RxReceivedTick[i] = 0;
+    }
 
     CCX_TIME_t current_tick = CCX_GET_TICK;
 
