@@ -1,17 +1,18 @@
 /*
- * can_corex.h
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- *  Created on: Aug 20, 2025
- *      Author: Adrian
+ * Author: Adrian Pietrzak
+ * GitHub: https://github.com/AdrianPietrzak1998
+ * Created: Aug 20, 2025
  */
 
 #ifndef CAN_COREX_CAN_COREX_H_
 #define CAN_COREX_CAN_COREX_H_
 
-
 #include <limits.h>
 #include <stdint.h>
-
 
 /**
  * @def CCX_TICK_FROM_FUNC
@@ -78,8 +79,6 @@ typedef CCX_TIME_BASE_TYPE_CUSTOM CC_TIME_t;
 
 #endif
 
-
-
 /**
  * @brief Enumeration indicating the status of the CAN bus.
  *
@@ -96,12 +95,19 @@ typedef enum
     CCX_BUS_FREE
 } CCX_BusIsFree_t;
 
-
 typedef enum
 {
     CCX_MSG_UNREG,
     CCX_MSG_REG
 } CCX_MsgRegStatus_t;
+
+typedef enum
+{
+    CCX_OK = 0,
+    CCX_NULL_PTR,
+    CCX_WRONG_ARG,
+    CCX_BUS_TOO_BUSY
+} CCX_Status_t;
 
 /**
  * @brief Structure representing a CAN message.
@@ -119,10 +125,6 @@ typedef struct
     uint8_t DLC : 4;
     uint8_t IDE_flag : 1;
 } CCX_message_t;
-
-
-
-
 
 typedef struct CCX_instance_t CCX_instance_t;
 
@@ -150,31 +152,30 @@ typedef struct
 struct CCX_instance_t
 {
 
-	void (*SendFunction)(const CCX_instance_t *Instance, const CCX_message_t *msg);
-	CCX_BusIsFree_t (*BusCheck)(const CCX_instance_t *Instance);
+    void (*SendFunction)(const CCX_instance_t *Instance, const CCX_message_t *msg);
+    CCX_BusIsFree_t (*BusCheck)(const CCX_instance_t *Instance);
 
+    CCX_message_t RxBuf[CCX_RX_BUFFER_SIZE];
+    CCX_message_t TxBuf[CCX_TX_BUFFER_SIZE];
+    uint16_t RxTail, RxHead, TxTail, TxHead;
+    CCX_TIME_t RxReceivedTick[CCX_RX_BUFFER_SIZE];
 
-	CCX_message_t RxBuf[CCX_RX_BUFFER_SIZE];
-	CCX_message_t TxBuf[CCX_TX_BUFFER_SIZE];
-	uint16_t RxTail, RxHead, TxTail, TxHead;
-	CCX_TIME_t RxReceivedTick[CCX_RX_BUFFER_SIZE];
-
-	CCX_RX_table_t* CCX_RX_table;
-	CCX_TX_table_t* CCX_TX_table;
-	uint16_t RxTableSize, TxTableSize;
-	void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot);
-	void (*Parser_unreg_msg)(const CCX_instance_t *Instance, CCX_message_t *Msg);
+    CCX_RX_table_t *CCX_RX_table;
+    CCX_TX_table_t *CCX_TX_table;
+    uint16_t RxTableSize, TxTableSize;
+    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot);
+    void (*Parser_unreg_msg)(const CCX_instance_t *Instance, CCX_message_t *Msg);
 };
 
-
-void CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg);
-void CCX_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg);
-void CCX_Poll(CCX_instance_t *Instance);
-void CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t* CCX_RX_table, CCX_TX_table_t* CCX_TX_table, uint16_t RxTableSize,
-		uint16_t TxTableSize, void (*SendFunction)(const CCX_instance_t *Instance, const CCX_message_t *msg),
-		CCX_BusIsFree_t (*BusCheck)(const CCX_instance_t *Instance), void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot),
-		void (*ParserUnregMsg)(const CCX_instance_t *Instance, CCX_message_t *Msg));
-
+CCX_Status_t CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg);
+CCX_Status_t CCX_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg);
+CCX_Status_t CCX_Poll(CCX_instance_t *Instance);
+CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CCX_TX_table_t *CCX_TX_table,
+                      uint16_t RxTableSize, uint16_t TxTableSize,
+                      void (*SendFunction)(const CCX_instance_t *Instance, const CCX_message_t *msg),
+                      CCX_BusIsFree_t (*BusCheck)(const CCX_instance_t *Instance),
+                      void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot),
+                      void (*ParserUnregMsg)(const CCX_instance_t *Instance, CCX_message_t *Msg));
 
 #if CCX_TICK_FROM_FUNC
 /**
@@ -197,6 +198,5 @@ void CCX_tick_function_register(CCX_TIME_t (*Function)(void));
  */
 void CCX_tick_variable_register(CCX_TIME_t *Variable);
 #endif
-
 
 #endif /* CAN_COREX_CAN_COREX_H_ */

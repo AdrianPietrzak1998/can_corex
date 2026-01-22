@@ -1,40 +1,43 @@
 /*
- * can_corex_net.c
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- *  Created on: Aug 26, 2025
- *      Author: Adrian
+ * Author: Adrian Pietrzak
+ * GitHub: https://github.com/AdrianPietrzak1998
+ * Created: Aug 26, 2025
  */
 
 #include "can_corex_net.h"
 #include "string.h"
+#include <assert.h>
 
+CCX_net_t *CCX_nets = NULL;
 
-CCX_net_t* CCX_nets = NULL;
-
-CCX_net_status_t CCX_net_clear_nodes(CCX_net_t* net)
+CCX_net_status_t CCX_net_clear_nodes(CCX_net_t *net)
 {
-	if (NULL == net)
-	{
-		return CCX_NET_NULL;
-	}
+    if (NULL == net)
+    {
+        return CCX_NET_NULL;
+    }
 
-	for (uint16_t i = 0; i < CCX_MAX_INSTANCE_IN_NETWORK; i++)
-	{
-		net->NodeList[i].NodeInstance = NULL;
-		net->NodeList[i].NodeSettings.Replication = CCX_NET_TX_REPLICATION;
-		net->NodeList[i].NodeSettings.NodeType = CCX_NET_NODE_IN_NET;
-	}
+    for (uint16_t i = 0; i < CCX_MAX_INSTANCE_IN_NETWORK; i++)
+    {
+        net->NodeList[i].NodeInstance = NULL;
+        net->NodeList[i].NodeSettings.Replication = CCX_NET_TX_REPLICATION;
+        net->NodeList[i].NodeSettings.NodeType = CCX_NET_NODE_IN_NET;
+    }
 
-	return CCX_NET_OK;
+    return CCX_NET_OK;
 }
 
-static void CCX_net_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t* msg)
+static void CCX_net_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
 {
     assert(Instance != NULL);
     assert(msg != NULL);
 
     uint16_t next_head = Instance->TxHead + 1;
-    if (next_head >= CCX_RX_BUFFER_SIZE)
+    if (next_head >= CCX_TX_BUFFER_SIZE) /* FIXED: was CCX_RX_BUFFER_SIZE */
     {
         next_head = 0;
     }
@@ -49,7 +52,7 @@ static void CCX_net_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t* ms
     memcpy(&Instance->TxBuf[Instance->TxHead], msg, sizeof(CCX_message_t));
 }
 
-static void CCX_net_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t* msg)
+static void CCX_net_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
 {
     assert(Instance != NULL);
 
@@ -69,31 +72,31 @@ static void CCX_net_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t* ms
     memcpy(&Instance->RxBuf[Instance->RxHead], msg, sizeof(CCX_message_t));
 }
 
-CCX_net_status_t CCX_net_init(CCX_net_t* net)
+CCX_net_status_t CCX_net_init(CCX_net_t *net)
 {
 
-	CCX_net_status_t status = CCX_NET_OK;
+    CCX_net_status_t status = CCX_NET_OK;
 
-	if (NULL == net)
-	{
-		return CCX_NET_NULL;
-	}
+    if (NULL == net)
+    {
+        return CCX_NET_NULL;
+    }
 
-	if (CCX_nets == NULL)
-	{
-		CCX_nets = net;
-		CCX_nets->next = NULL;
+    if (CCX_nets == NULL)
+    {
+        CCX_nets = net;
+        CCX_nets->next = NULL;
 
-		status = CCX_NET_OK;
-	}
-	else
-	{
-        CCX_net_t* last = CCX_nets;
+        status = CCX_NET_OK;
+    }
+    else
+    {
+        CCX_net_t *last = CCX_nets;
         while (last->next != NULL)
         {
             if (last == net)
             {
-            	return CCX_NET_ALREDY_EXISTING;
+                return CCX_NET_ALREDY_EXISTING;
             }
             last = last->next;
         }
@@ -101,13 +104,12 @@ CCX_net_status_t CCX_net_init(CCX_net_t* net)
         net->next = NULL;
 
         status = CCX_NET_OK;
-	}
+    }
 
-	return status;
+    return status;
 }
 
-
-CCX_net_status_t CCX_net_deinit(CCX_net_t* net)
+CCX_net_status_t CCX_net_deinit(CCX_net_t *net)
 {
     if (net == NULL)
     {
@@ -121,7 +123,7 @@ CCX_net_status_t CCX_net_deinit(CCX_net_t* net)
         return CCX_NET_OK;
     }
 
-    CCX_net_t* prev = CCX_nets;
+    CCX_net_t *prev = CCX_nets;
     while (prev->next != NULL)
     {
         if (prev->next == net)
@@ -136,53 +138,41 @@ CCX_net_status_t CCX_net_deinit(CCX_net_t* net)
     return CCX_NET_DOES_NOT_EXISTING;
 }
 
-void CCX_net_push(const CCX_instance_t* Instance, const CCX_message_t* msg, uint8_t FromTxFunc)
+void CCX_net_push(const CCX_instance_t *Instance, const CCX_message_t *msg, uint8_t FromTxFunc)
 {
-	if (CCX_nets == NULL)
-	{
-		return;
-	}
+    if (CCX_nets == NULL)
+    {
+        return;
+    }
 
-	CCX_net_t* net = CCX_nets;
-	do
-	{
-		for (uint16_t i = 0; i < CCX_MAX_INSTANCE_IN_NETWORK; i++)
-		{
-			if (Instance == net->NodeList[i].NodeInstance && (!FromTxFunc || (CCX_NET_NODE_IN_NET == net->NodeList[i].NodeSettings.NodeType)))
-			{
-				for (uint16_t j = 0; j < CCX_MAX_INSTANCE_IN_NETWORK; j++)
-				{
-					if ((Instance != net->NodeList[j].NodeInstance) && NULL != net->NodeList[j].NodeInstance)
-					{
-						switch (net->NodeList[j].NodeSettings.Replication)
-						{
-						case CCX_NET_TX_REPLICATION:
-							CCX_net_TX_PushMsg(net->NodeList[j].NodeInstance, msg);
-							break;
-						case CCX_NET_TX_RX_REPLICATION:
-							CCX_net_TX_PushMsg(net->NodeList[j].NodeInstance, msg);
-							CCX_net_RX_PushMsg(net->NodeList[j].NodeInstance, msg);
-							break;
-						}
-					}
-				}
+    CCX_net_t *net = CCX_nets;
+    do
+    {
+        for (uint16_t i = 0; i < CCX_MAX_INSTANCE_IN_NETWORK; i++)
+        {
+            if (Instance == net->NodeList[i].NodeInstance &&
+                (!FromTxFunc || (CCX_NET_NODE_IN_NET == net->NodeList[i].NodeSettings.NodeType)))
+            {
+                for (uint16_t j = 0; j < CCX_MAX_INSTANCE_IN_NETWORK; j++)
+                {
+                    if ((Instance != net->NodeList[j].NodeInstance) && NULL != net->NodeList[j].NodeInstance)
+                    {
+                        switch (net->NodeList[j].NodeSettings.Replication)
+                        {
+                        case CCX_NET_TX_REPLICATION:
+                            CCX_net_TX_PushMsg(net->NodeList[j].NodeInstance, msg);
+                            break;
+                        case CCX_NET_TX_RX_REPLICATION:
+                            CCX_net_TX_PushMsg(net->NodeList[j].NodeInstance, msg);
+                            CCX_net_RX_PushMsg(net->NodeList[j].NodeInstance, msg);
+                            break;
+                        }
+                    }
+                }
 
-				break;
-			}
-		}
-		net = net->next;
-	} while(net != NULL);
-
+                break;
+            }
+        }
+        net = net->next;
+    } while (net != NULL);
 }
-
-
-
-
-
-
-
-
-
-
-
-
