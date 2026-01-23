@@ -509,6 +509,8 @@ CAN CoreX includes ISO 15765-2 (ISO-TP) implementation for sending messages larg
 
 ### Basic Usage
 
+#### Transmitter Node (Sending ISO-TP Messages)
+
 ```c
 #include "can_corex.h"
 #include "can_corex_isotp.h"
@@ -517,28 +519,25 @@ CAN CoreX includes ISO 15765-2 (ISO-TP) implementation for sending messages larg
 CCX_instance_t can;
 CCX_tick_variable_register(&system_tick);
 
-// Create ISO-TP instances
+// Create ISO-TP TX instance
 CCX_ISOTP_TX_t isotp_tx;
-CCX_ISOTP_RX_t isotp_rx;
-uint8_t rx_buffer[512];
 
-// RX table with ISO-TP parsers
+// RX table - only for receiving Flow Control frames
 CCX_RX_table_t rx_table[] = {
-    CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x123, 0),     // Receive data on 0x123 (Standard ID)
     CCX_ISOTP_TX_FC_TABLE_ENTRY(&isotp_tx, 0x321, 0)   // Receive FC on 0x321 (Standard ID)
 };
 
-CCX_Init(&can, rx_table, NULL, 2, 0, hw_send, hw_bus_check, NULL);
+CCX_Init(&can, rx_table, NULL, 1, 0, hw_send, hw_bus_check, NULL);
 
 // Configure ISO-TP TX
 CCX_ISOTP_TX_Config_t tx_cfg = {
     .CanInstance = &can,
-    .TxID = 0x123,
-    .RxID_FC = 0x321,
-    .IDE_TxID = 0,        // 0 = Standard ID (11-bit)
-    .IDE_RxID_FC = 0,     // 0 = Standard ID (11-bit)
-    .BS = 0,              // Block Size (0 = no limit)
-    .STmin = 10,          // Separation Time minimum (10ms)
+    .TxID = 0x123,           // Send data on 0x123
+    .RxID_FC = 0x321,        // Receive Flow Control on 0x321
+    .IDE_TxID = 0,           // 0 = Standard ID (11-bit)
+    .IDE_RxID_FC = 0,        // 0 = Standard ID (11-bit)
+    .BS = 0,                 // Block Size (0 = no limit)
+    .STmin = 10,             // Separation Time minimum (10ms)
     .N_As = 1000,
     .N_Bs = 1000,
     .N_Cs = 1000,
@@ -548,19 +547,52 @@ CCX_ISOTP_TX_Config_t tx_cfg = {
 };
 CCX_ISOTP_TX_Init(&isotp_tx, &tx_cfg);
 
+// Transmit large message
+uint8_t data[200];
+// ... fill data ...
+CCX_ISOTP_Transmit(&isotp_tx, data, 200);
+
+// Main loop
+while (1) {
+    CCX_Poll(&can);              // Process CAN messages
+    CCX_ISOTP_TX_Poll(&isotp_tx); // Handle ISO-TP TX state machine
+}
+```
+
+#### Receiver Node (Receiving ISO-TP Messages)
+
+```c
+#include "can_corex.h"
+#include "can_corex_isotp.h"
+
+// Initialize CAN CoreX
+CCX_instance_t can;
+CCX_tick_variable_register(&system_tick);
+
+// Create ISO-TP RX instance
+CCX_ISOTP_RX_t isotp_rx;
+uint8_t rx_buffer[512];
+
+// RX table - for receiving data frames
+CCX_RX_table_t rx_table[] = {
+    CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x123, 0)     // Receive data on 0x123 (Standard ID)
+};
+
+CCX_Init(&can, rx_table, NULL, 1, 0, hw_send, hw_bus_check, NULL);
+
 // Configure ISO-TP RX
 CCX_ISOTP_RX_Config_t rx_cfg = {
     .CanInstance = &can,
-    .RxID = 0x123,
-    .TxID = 0x321,
-    .IDE_RxID = 0,        // 0 = Standard ID (11-bit)
-    .IDE_TxID = 0,        // 0 = Standard ID (11-bit)
-    .BS = 0,
-    .STmin = 10,
+    .RxID = 0x123,           // Receive data on 0x123
+    .TxID = 0x321,           // Send Flow Control on 0x321
+    .IDE_RxID = 0,           // 0 = Standard ID (11-bit)
+    .IDE_TxID = 0,           // 0 = Standard ID (11-bit)
+    .BS = 0,                 // Block Size to request (0 = no limit)
+    .STmin = 10,             // Separation Time to request (10ms)
     .N_Ar = 1000,
     .N_Br = 1000,
     .N_Cr = 1000,
-    .Padding = {.Enable = 0},  // FC without padding
+    .Padding = {.Enable = 1, .PaddingByte = 0xAA},  // FC with padding
     .RxBuffer = rx_buffer,
     .RxBufferSize = sizeof(rx_buffer),
     .OnReceiveComplete = rx_complete_callback,
@@ -568,15 +600,22 @@ CCX_ISOTP_RX_Config_t rx_cfg = {
 };
 CCX_ISOTP_RX_Init(&isotp_rx, &rx_cfg);
 
-// Transmit large message
-uint8_t data[200];
-CCX_ISOTP_Transmit(&isotp_tx, data, 200);
-
 // Main loop
 while (1) {
     CCX_Poll(&can);              // Process CAN messages
-    CCX_ISOTP_TX_Poll(&isotp_tx); // Handle ISO-TP TX state machine
     CCX_ISOTP_RX_Poll(&isotp_rx); // Handle ISO-TP RX timeouts
+}
+```
+
+**Complete Callback Example**:
+```c
+void rx_complete_callback(CCX_ISOTP_RX_t *Instance, const uint8_t *Data, uint16_t Length) {
+    printf("Received %d bytes via ISO-TP\n", Length);
+    // Process received data...
+}
+
+void tx_complete_callback(CCX_ISOTP_TX_t *Instance) {
+    printf("Transmission complete!\n");
 }
 ```
 
@@ -596,27 +635,21 @@ Flow Control frames respect the `Padding` configuration from RX:
 
 Both variants work correctly thanks to `CCX_DLC_ANY` wildcard matching in the RX table macros.
 
-### Callbacks
+### Progress Monitoring
 
-**TX Complete**:
-```c
-void tx_complete_callback(CCX_ISOTP_TX_t *Instance) {
-    printf("Transmission complete!\n");
-}
-```
+For large transfers, you can monitor reception progress:
 
-**RX Complete**:
 ```c
-void rx_complete_callback(CCX_ISOTP_RX_t *Instance, const uint8_t *Data, uint16_t Length) {
-    printf("Received %d bytes\n", Length);
-    // Process received data
-}
-```
+CCX_ISOTP_RX_Config_t rx_cfg = {
+    // ... other config ...
+    .ProgressCallbackInterval = 512,  // Call every 512 bytes
+    .OnReceiveProgress = rx_progress_callback,
+};
 
-**RX Progress** (optional):
-```c
 void rx_progress_callback(CCX_ISOTP_RX_t *Instance, uint16_t BytesReceived, uint16_t TotalLength) {
-    printf("Progress: %d/%d bytes\n", BytesReceived, TotalLength);
+    printf("Progress: %d/%d bytes (%.1f%%)\n", 
+           BytesReceived, TotalLength, 
+           (100.0 * BytesReceived) / TotalLength);
 }
 ```
 

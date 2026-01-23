@@ -22,10 +22,10 @@ extern CCX_TIME_t *CCX_tick;
 #endif
 
 /* ISO-TP frame constants */
-#define ISOTP_SF_MAX_DATA 7    /* Single Frame max data bytes */
-#define ISOTP_FF_DATA_BYTES 6  /* First Frame data bytes (after 2-byte length) */
-#define ISOTP_CF_DATA_BYTES 7  /* Consecutive Frame data bytes */
-#define ISOTP_FC_SIZE 3        /* Flow Control frame size (PCI, FS, BS, STmin) */
+#define ISOTP_SF_MAX_DATA 7 /* Single Frame max data bytes */
+#define ISOTP_FF_DATA_BYTES 6 /* First Frame data bytes (after 2-byte length) */
+#define ISOTP_CF_DATA_BYTES 7 /* Consecutive Frame data bytes */
+#define ISOTP_FC_SIZE 3 /* Flow Control frame size (PCI, FS, BS, STmin) */
 
 #define ISOTP_MAX_WAIT_FRAMES 10 /* Maximum number of WAIT FC frames to tolerate */
 
@@ -506,8 +506,7 @@ static inline void CCX_ISOTP_RX_HandleConsecutiveFrame(CCX_ISOTP_RX_t *Instance,
     /* Check progress callback */
     if (Instance->Config.ProgressCallbackInterval > 0 && Instance->Config.OnReceiveProgress != NULL)
     {
-        uint16_t bytes_since_last =
-            Instance->RxDataOffset - Instance->LastProgressCallback;
+        uint16_t bytes_since_last = Instance->RxDataOffset - Instance->LastProgressCallback;
         if (bytes_since_last >= Instance->Config.ProgressCallbackInterval)
         {
             Instance->Config.OnReceiveProgress(Instance, bytes_since_last, Instance->RxDataLength);
