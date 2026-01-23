@@ -74,12 +74,12 @@ static inline uint8_t ISOTP_GetFCSTmin(const CCX_message_t *msg)
     return msg->Data[3];
 }
 
-static inline void ISOTP_SendCANMessage(CCX_instance_t *CanInstance, uint32_t ID, const uint8_t *Data, uint8_t DLC,
-                                        const CCX_ISOTP_Padding_t *Padding)
+static inline void ISOTP_SendCANMessage(CCX_instance_t *CanInstance, uint32_t ID, uint8_t IDE_flag, const uint8_t *Data,
+                                        uint8_t DLC, const CCX_ISOTP_Padding_t *Padding)
 {
     CCX_message_t msg;
     msg.ID = ID;
-    msg.IDE_flag = 0;
+    msg.IDE_flag = IDE_flag;
     msg.DLC = DLC;
     memcpy(msg.Data, Data, DLC);
 
@@ -159,8 +159,8 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
         frame[0] = (uint8_t)(CCX_ISOTP_PCI_SF | Length);
         memcpy(&frame[1], Data, Length);
 
-        ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, frame, (uint8_t)(1 + Length),
-                             &Instance->Config.Padding);
+        ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
+                             (uint8_t)(1 + Length), &Instance->Config.Padding);
 
         Instance->State = CCX_ISOTP_TX_STATE_SENDING_SF;
         Instance->LastTick = CCX_GET_TICK;
@@ -181,7 +181,8 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
     frame[1] = (uint8_t)(Length & 0xFF);
     memcpy(&frame[2], Data, ISOTP_FF_DATA_BYTES);
 
-    ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, frame, 8, &Instance->Config.Padding);
+    ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame, 8,
+                         &Instance->Config.Padding);
 
     Instance->TxDataOffset = ISOTP_FF_DATA_BYTES;
     Instance->SequenceNumber = 1;
@@ -259,8 +260,8 @@ static inline void CCX_ISOTP_TX_SendConsecutiveFrame(CCX_ISOTP_TX_t *Instance)
     frame[0] = (uint8_t)(CCX_ISOTP_PCI_CF | (Instance->SequenceNumber & 0x0F));
     memcpy(&frame[1], &Instance->TxData[Instance->TxDataOffset], data_len);
 
-    ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, frame, (uint8_t)(1 + data_len),
-                         &Instance->Config.Padding);
+    ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
+                         (uint8_t)(1 + data_len), &Instance->Config.Padding);
 
     Instance->TxDataOffset += data_len;
     Instance->SequenceNumber = (Instance->SequenceNumber + 1) & 0x0F;
@@ -378,8 +379,8 @@ static inline void CCX_ISOTP_RX_SendFlowControl(CCX_ISOTP_RX_t *Instance, CCX_IS
     frame[3] = Instance->Config.STmin;
 
     /* Use configured padding for FC */
-    ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, frame, ISOTP_FC_SIZE + 1,
-                         &Instance->Config.Padding);
+    ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
+                         ISOTP_FC_SIZE + 1, &Instance->Config.Padding);
 }
 
 static inline void CCX_ISOTP_RX_HandleSingleFrame(CCX_ISOTP_RX_t *Instance, const CCX_message_t *msg)

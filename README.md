@@ -4,7 +4,7 @@
 [![Version](https://img.shields.io/badge/Version-1.2.0-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-93%2F103%20passing-success.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-108%2F108%20passing-success.svg)]()
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
 
@@ -36,6 +36,7 @@ CAN CoreX is a lightweight, modular CAN bus communication library designed for e
 - **Network Replication**: Multi-instance message routing and replication
 - **Timestamp Tracking**: Automatic message receive time recording
 - **ISO-TP Protocol**: ISO 15765-2 transport layer for multi-frame messages
+- **Extended ID Support**: Full support for both Standard (11-bit) and Extended (29-bit) CAN IDs
 - **Wildcard Matching**: Accept any DLC with `CCX_DLC_ANY` in RX table
 
 ---
@@ -504,6 +505,7 @@ CAN CoreX includes ISO 15765-2 (ISO-TP) implementation for sending messages larg
 - **Timeout Monitoring**: N_As, N_Bs, N_Cs, N_Ar, N_Br, N_Cr timeouts
 - **Progress Callbacks**: Monitor reception progress for large transfers
 - **Separate TX/RX Instances**: Independent transmit and receive handling
+- **Extended ID Support**: Full support for both Standard (11-bit) and Extended (29-bit) CAN identifiers
 
 ### Basic Usage
 
@@ -522,8 +524,8 @@ uint8_t rx_buffer[512];
 
 // RX table with ISO-TP parsers
 CCX_RX_table_t rx_table[] = {
-    CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x123),     // Receive data on 0x123
-    CCX_ISOTP_TX_FC_TABLE_ENTRY(&isotp_tx, 0x321)   // Receive FC on 0x321
+    CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x123, 0),     // Receive data on 0x123 (Standard ID)
+    CCX_ISOTP_TX_FC_TABLE_ENTRY(&isotp_tx, 0x321, 0)   // Receive FC on 0x321 (Standard ID)
 };
 
 CCX_Init(&can, rx_table, NULL, 2, 0, hw_send, hw_bus_check, NULL);
@@ -533,6 +535,8 @@ CCX_ISOTP_TX_Config_t tx_cfg = {
     .CanInstance = &can,
     .TxID = 0x123,
     .RxID_FC = 0x321,
+    .IDE_TxID = 0,        // 0 = Standard ID (11-bit)
+    .IDE_RxID_FC = 0,     // 0 = Standard ID (11-bit)
     .BS = 0,              // Block Size (0 = no limit)
     .STmin = 10,          // Separation Time minimum (10ms)
     .N_As = 1000,
@@ -549,6 +553,8 @@ CCX_ISOTP_RX_Config_t rx_cfg = {
     .CanInstance = &can,
     .RxID = 0x123,
     .TxID = 0x321,
+    .IDE_RxID = 0,        // 0 = Standard ID (11-bit)
+    .IDE_TxID = 0,        // 0 = Standard ID (11-bit)
     .BS = 0,
     .STmin = 10,
     .N_Ar = 1000,
@@ -612,6 +618,82 @@ void rx_complete_callback(CCX_ISOTP_RX_t *Instance, const uint8_t *Data, uint16_
 void rx_progress_callback(CCX_ISOTP_RX_t *Instance, uint16_t BytesReceived, uint16_t TotalLength) {
     printf("Progress: %d/%d bytes\n", BytesReceived, TotalLength);
 }
+```
+
+### Extended ID Support
+
+ISO-TP supports both Standard (11-bit) and Extended (29-bit) CAN identifiers.
+
+**Standard ID (11-bit) - Range: 0x000 to 0x7FF**:
+```c
+CCX_RX_table_t rx_table[] = {
+    CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x123, 0),     // Standard ID
+    CCX_ISOTP_TX_FC_TABLE_ENTRY(&isotp_tx, 0x321, 0)   // Standard ID
+};
+
+CCX_ISOTP_TX_Config_t tx_cfg = {
+    .TxID = 0x123,
+    .RxID_FC = 0x321,
+    .IDE_TxID = 0,        // Standard ID
+    .IDE_RxID_FC = 0,     // Standard ID
+    // ... other config
+};
+
+CCX_ISOTP_RX_Config_t rx_cfg = {
+    .RxID = 0x123,
+    .TxID = 0x321,
+    .IDE_RxID = 0,        // Standard ID
+    .IDE_TxID = 0,        // Standard ID
+    // ... other config
+};
+```
+
+**Extended ID (29-bit) - Range: 0x00000000 to 0x1FFFFFFF**:
+```c
+CCX_RX_table_t rx_table[] = {
+    CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x18DA00F1, 1),     // Extended ID
+    CCX_ISOTP_TX_FC_TABLE_ENTRY(&isotp_tx, 0x18DAF100, 1)   // Extended ID
+};
+
+CCX_ISOTP_TX_Config_t tx_cfg = {
+    .TxID = 0x18DA00F1,
+    .RxID_FC = 0x18DAF100,
+    .IDE_TxID = 1,        // Extended ID
+    .IDE_RxID_FC = 1,     // Extended ID
+    // ... other config
+};
+
+CCX_ISOTP_RX_Config_t rx_cfg = {
+    .RxID = 0x18DA00F1,
+    .TxID = 0x18DAF100,
+    .IDE_RxID = 1,        // Extended ID
+    .IDE_TxID = 1,        // Extended ID
+    // ... other config
+};
+```
+
+**Mixed Configuration** (TX uses Standard, RX uses Extended):
+```c
+CCX_RX_table_t rx_table[] = {
+    CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x18DA00F1, 1),     // Extended ID
+    CCX_ISOTP_TX_FC_TABLE_ENTRY(&isotp_tx, 0x321, 0)        // Standard ID
+};
+
+CCX_ISOTP_TX_Config_t tx_cfg = {
+    .TxID = 0x123,
+    .RxID_FC = 0x321,
+    .IDE_TxID = 0,        // Standard ID
+    .IDE_RxID_FC = 0,     // Standard ID for FC
+    // ... other config
+};
+
+CCX_ISOTP_RX_Config_t rx_cfg = {
+    .RxID = 0x18DA00F1,
+    .TxID = 0x18DAF100,
+    .IDE_RxID = 1,        // Extended ID
+    .IDE_TxID = 1,        // Extended ID for FC
+    // ... other config
+};
 ```
 
 ### Limitations
@@ -833,10 +915,11 @@ Mozilla Public License 2.0 - see LICENSE file for details.
   - Flow Control with CTS/WAIT/OVFLW
   - Configurable padding and timeouts
   - Progress callbacks for large transfers
+  - **Extended ID Support**: Full support for both Standard (11-bit) and Extended (29-bit) CAN identifiers
 - **Wildcard DLC Matching**: `CCX_DLC_ANY` constant for accepting any DLC in RX table
   - Enables flexible protocol handling (ISO-TP, J1939, etc.)
   - Useful for messages with variable padding
-- **Updated Tests**: 92/92 tests passing (added ISO-TP test suite)
+- **Updated Tests**: 108/108 tests passing (added ISO-TP test suite with Extended ID tests)
 
 ### Previous Release: v1.1.0 (2026-01-22)
 - **Per-message timeout callbacks**: `TimeoutCallback` moved from `CCX_instance_t` to `CCX_RX_table_t` for better flexibility

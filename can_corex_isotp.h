@@ -100,6 +100,8 @@ typedef struct
     CCX_instance_t *CanInstance; /* Pointer to CAN CoreX instance */
     uint32_t TxID;                /* CAN ID for transmitting data */
     uint32_t RxID_FC;             /* CAN ID for receiving Flow Control frames */
+    uint8_t IDE_TxID : 1;         /* 0 = Standard ID (11-bit), 1 = Extended ID (29-bit) for TxID */
+    uint8_t IDE_RxID_FC : 1;      /* 0 = Standard ID (11-bit), 1 = Extended ID (29-bit) for RxID_FC */
     uint8_t BS;                   /* Block Size: number of CF before expecting FC (0 = no limit) */
     uint8_t STmin;                /* Separation Time minimum (0-127ms or 0xF1-0xF9 for 100-900us) */
     CCX_TIME_t N_As;              /* Timeout for TX of SF/FF/CF (default: 1000ms) */
@@ -120,6 +122,8 @@ typedef struct
     CCX_instance_t *CanInstance; /* Pointer to CAN CoreX instance */
     uint32_t RxID;                /* CAN ID for receiving data */
     uint32_t TxID;                /* CAN ID for transmitting Flow Control */
+    uint8_t IDE_RxID : 1;         /* 0 = Standard ID (11-bit), 1 = Extended ID (29-bit) for RxID */
+    uint8_t IDE_TxID : 1;         /* 0 = Standard ID (11-bit), 1 = Extended ID (29-bit) for TxID */
     uint8_t BS;                   /* Block Size to request in FC (0 = no limit) */
     uint8_t STmin;                /* Separation Time minimum to request in FC */
     CCX_TIME_t N_Ar;              /* Timeout for RX of SF/FF/CF (default: 1000ms) */
@@ -253,18 +257,20 @@ void CCX_ISOTP_RX_Poll(CCX_ISOTP_RX_t *Instance);
  *
  * @param isotp_rx_ptr Pointer to CCX_ISOTP_RX_t instance
  * @param can_id CAN ID for receiving ISO-TP data frames
+ * @param ide_flag 0 = Standard ID (11-bit), 1 = Extended ID (29-bit)
  *
  * Note: Uses CCX_DLC_ANY to accept any DLC (wildcard matching in CAN CoreX)
  *
  * Usage example:
  * CCX_ISOTP_RX_t isotp_rx;
  * CCX_RX_table_t rx_table[] = {
- *     CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x123)
+ *     CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x123, 0),           // Standard ID
+ *     CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x18DA00F1, 1)       // Extended ID
  * };
  */
-#define CCX_ISOTP_RX_TABLE_ENTRY(isotp_rx_ptr, can_id)                                                                \
+#define CCX_ISOTP_RX_TABLE_ENTRY(isotp_rx_ptr, can_id, ide_flag)                                                      \
     {                                                                                                                  \
-        .ID = (can_id), .DLC = CCX_DLC_ANY, .IDE_flag = 0, .TimeOut = 0, .Parser = CCX_ISOTP_RX_Parser,              \
+        .ID = (can_id), .DLC = CCX_DLC_ANY, .IDE_flag = (ide_flag), .TimeOut = 0, .Parser = CCX_ISOTP_RX_Parser,     \
         .TimeoutCallback = NULL, .LastTick = 0                                                                         \
     }
 
@@ -273,6 +279,7 @@ void CCX_ISOTP_RX_Poll(CCX_ISOTP_RX_t *Instance);
  *
  * @param isotp_tx_ptr Pointer to CCX_ISOTP_TX_t instance
  * @param fc_can_id CAN ID for receiving Flow Control frames
+ * @param ide_flag 0 = Standard ID (11-bit), 1 = Extended ID (29-bit)
  *
  * Note: Uses CCX_DLC_ANY - FC can be sent with or without padding
  *
@@ -280,13 +287,13 @@ void CCX_ISOTP_RX_Poll(CCX_ISOTP_RX_t *Instance);
  * CCX_ISOTP_TX_t isotp_tx;
  * CCX_ISOTP_RX_t isotp_rx;
  * CCX_RX_table_t rx_table[] = {
- *     CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x123),
- *     CCX_ISOTP_TX_FC_TABLE_ENTRY(&isotp_tx, 0x321)  // For receiving FC frames
+ *     CCX_ISOTP_RX_TABLE_ENTRY(&isotp_rx, 0x123, 0),           // Standard ID
+ *     CCX_ISOTP_TX_FC_TABLE_ENTRY(&isotp_tx, 0x321, 0)         // Standard ID for FC
  * };
  */
-#define CCX_ISOTP_TX_FC_TABLE_ENTRY(isotp_tx_ptr, fc_can_id)                                                          \
+#define CCX_ISOTP_TX_FC_TABLE_ENTRY(isotp_tx_ptr, fc_can_id, ide_flag)                                                \
     {                                                                                                                  \
-        .ID = (fc_can_id), .DLC = CCX_DLC_ANY, .IDE_flag = 0, .TimeOut = 0, .Parser = CCX_ISOTP_TX_FC_Parser,        \
+        .ID = (fc_can_id), .DLC = CCX_DLC_ANY, .IDE_flag = (ide_flag), .TimeOut = 0, .Parser = CCX_ISOTP_TX_FC_Parser, \
         .TimeoutCallback = NULL, .LastTick = 0                                                                         \
     }
 
