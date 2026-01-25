@@ -4,7 +4,7 @@
 [![Version](https://img.shields.io/badge/Version-1.2.0-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-114%2F114%20passing-success.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-143%2F143%20passing-success.svg)]()
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
 
@@ -968,7 +968,24 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 - **Wildcard DLC Matching**: `CCX_DLC_ANY` constant for accepting any DLC in RX table
   - Enables flexible protocol handling (ISO-TP, J1939, etc.)
   - Useful for messages with variable padding
-- **Updated Tests**: 114/114 tests passing (added UserData tests for both CAN CoreX and ISO-TP)
+  - Comprehensive test coverage added
+- **Enhanced Testing**: 143/143 tests passing
+  - TimeoutCallback with UserData validation
+  - CCX_DLC_ANY wildcard matching tests (all DLC values 0-8)
+  - Extended ID support in basic CAN CoreX (Standard vs Extended ID filtering)
+  - ISO-TP UserData callback verification
+  - Full protocol compliance testing
+  - Network initialization and message replication tests
+- **Improved Documentation**: 
+  - Detailed code comments for all ISO-TP helper functions
+  - UserData usage examples in structure documentation
+  - Complete API reference with practical code examples
+  - Clear separation of Standard ID (11-bit) and Extended ID (29-bit) usage
+  - **CAN Network (can_corex_net) fully documented**:
+    - Complete API documentation for all functions
+    - Network architecture explained (linked list, node types, replication modes)
+    - Practical examples (ECU network simulation)
+    - Added missing `CCX_net_clear_nodes()` to public API
 
 ### Previous Release: v1.1.0 (2026-01-22)
 - **Per-message timeout callbacks**: `TimeoutCallback` moved from `CCX_instance_t` to `CCX_RX_table_t` for better flexibility

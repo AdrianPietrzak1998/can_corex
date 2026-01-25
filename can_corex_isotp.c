@@ -22,10 +22,10 @@ extern CCX_TIME_t *CCX_tick;
 #endif
 
 /* ISO-TP frame constants */
-#define ISOTP_SF_MAX_DATA 7    /* Single Frame max data bytes */
-#define ISOTP_FF_DATA_BYTES 6  /* First Frame data bytes (after 2-byte length) */
-#define ISOTP_CF_DATA_BYTES 7  /* Consecutive Frame data bytes */
-#define ISOTP_FC_SIZE 3        /* Flow Control frame size (PCI, FS, BS, STmin) */
+#define ISOTP_SF_MAX_DATA 7 /* Single Frame max data bytes */
+#define ISOTP_FF_DATA_BYTES 6 /* First Frame data bytes (after 2-byte length) */
+#define ISOTP_CF_DATA_BYTES 7 /* Consecutive Frame data bytes */
+#define ISOTP_FC_SIZE 3 /* Flow Control frame size (PCI, FS, BS, STmin) */
 
 #define ISOTP_MAX_WAIT_FRAMES 10 /* Maximum number of WAIT FC frames to tolerate */
 
@@ -33,41 +33,85 @@ extern CCX_TIME_t *CCX_tick;
  * HELPER FUNCTIONS
  * ======================================================================== */
 
+/**
+ * @brief Extract Protocol Control Information (PCI) from ISO-TP frame
+ * @param msg CAN message containing ISO-TP frame
+ * @return PCI nibble (0x00=SF, 0x10=FF, 0x20=CF, 0x30=FC)
+ */
 static inline uint8_t ISOTP_GetPCI(const CCX_message_t *msg)
 {
     return msg->Data[0] & 0xF0;
 }
 
+/**
+ * @brief Extract data length from Single Frame
+ * @param msg CAN message containing Single Frame
+ * @return Number of data bytes in SF (0-7)
+ */
 static inline uint8_t ISOTP_GetSFDataLength(const CCX_message_t *msg)
 {
     return msg->Data[0] & 0x0F;
 }
 
+/**
+ * @brief Extract total message length from First Frame
+ * @param msg CAN message containing First Frame
+ * @return Total message length in bytes (8-4095)
+ */
 static inline uint16_t ISOTP_GetFFDataLength(const CCX_message_t *msg)
 {
     return (uint16_t)(((msg->Data[0] & 0x0F) << 8) | msg->Data[1]);
 }
 
+/**
+ * @brief Extract sequence number from Consecutive Frame
+ * @param msg CAN message containing Consecutive Frame
+ * @return Sequence number (0-15, wraps around)
+ */
 static inline uint8_t ISOTP_GetCFSequenceNumber(const CCX_message_t *msg)
 {
     return msg->Data[0] & 0x0F;
 }
 
+/**
+ * @brief Extract Flow Status from Flow Control frame
+ * @param msg CAN message containing Flow Control
+ * @return Flow Status (0x00=CTS, 0x01=WAIT, 0x02=OVFLW)
+ */
 static inline uint8_t ISOTP_GetFCFlowStatus(const CCX_message_t *msg)
 {
     return msg->Data[1];
 }
 
+/**
+ * @brief Extract Block Size from Flow Control frame
+ * @param msg CAN message containing Flow Control
+ * @return Block Size (0=unlimited, 1-255=number of CF before next FC)
+ */
 static inline uint8_t ISOTP_GetFCBlockSize(const CCX_message_t *msg)
 {
     return msg->Data[2];
 }
 
+/**
+ * @brief Extract Separation Time minimum from Flow Control frame
+ * @param msg CAN message containing Flow Control
+ * @return STmin value (0-127ms or 0xF1-0xF9 for 100-900µs)
+ */
 static inline uint8_t ISOTP_GetFCSTmin(const CCX_message_t *msg)
 {
     return msg->Data[3];
 }
 
+/**
+ * @brief Send CAN message with optional padding
+ * @param CanInstance CAN CoreX instance
+ * @param ID CAN identifier
+ * @param IDE_flag 0=Standard ID (11-bit), 1=Extended ID (29-bit)
+ * @param Data Pointer to data bytes
+ * @param DLC Data Length Code (1-8)
+ * @param Padding Padding configuration (enable/disable and padding byte)
+ */
 static inline void ISOTP_SendCANMessage(CCX_instance_t *CanInstance, uint32_t ID, uint8_t IDE_flag, const uint8_t *Data,
                                         uint8_t DLC, const CCX_ISOTP_Padding_t *Padding)
 {
@@ -494,11 +538,11 @@ static inline void CCX_ISOTP_RX_HandleConsecutiveFrame(CCX_ISOTP_RX_t *Instance,
     /* Check progress callback */
     if (Instance->Config.ProgressCallbackInterval > 0 && Instance->Config.OnReceiveProgress != NULL)
     {
-        uint16_t bytes_since_last =
-            Instance->RxDataOffset - Instance->LastProgressCallback;
+        uint16_t bytes_since_last = Instance->RxDataOffset - Instance->LastProgressCallback;
         if (bytes_since_last >= Instance->Config.ProgressCallbackInterval)
         {
-            Instance->Config.OnReceiveProgress(Instance, bytes_since_last, Instance->RxDataLength, Instance->Config.UserData);
+            Instance->Config.OnReceiveProgress(Instance, bytes_since_last, Instance->RxDataLength,
+                                               Instance->Config.UserData);
             Instance->LastProgressCallback = Instance->RxDataOffset;
         }
     }
@@ -514,14 +558,16 @@ static inline void CCX_ISOTP_RX_HandleConsecutiveFrame(CCX_ISOTP_RX_t *Instance,
             uint16_t bytes_since_last = Instance->RxDataOffset - Instance->LastProgressCallback;
             if (bytes_since_last > 0)
             {
-                Instance->Config.OnReceiveProgress(Instance, bytes_since_last, Instance->RxDataLength, Instance->Config.UserData);
+                Instance->Config.OnReceiveProgress(Instance, bytes_since_last, Instance->RxDataLength,
+                                                   Instance->Config.UserData);
             }
         }
 
         /* Call complete callback */
         if (Instance->Config.OnReceiveComplete != NULL)
         {
-            Instance->Config.OnReceiveComplete(Instance, Instance->Config.RxBuffer, Instance->RxDataLength, Instance->Config.UserData);
+            Instance->Config.OnReceiveComplete(Instance, Instance->Config.RxBuffer, Instance->RxDataLength,
+                                               Instance->Config.UserData);
         }
         return;
     }
