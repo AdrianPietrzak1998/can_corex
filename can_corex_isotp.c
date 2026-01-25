@@ -197,10 +197,7 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
         ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
                              (uint8_t)(1 + Length), &Instance->Config.Padding);
 
-        Instance->State = CCX_ISOTP_TX_STATE_SENDING_SF;
-        Instance->LastTick = CCX_GET_TICK;
-
-        /* SF completes immediately */
+        /* SF completes immediately - no state machine or timeout needed */
         Instance->State = CCX_ISOTP_TX_STATE_IDLE;
         if (Instance->Config.OnTransmitComplete != NULL)
         {
