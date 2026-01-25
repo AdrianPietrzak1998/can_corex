@@ -4,7 +4,7 @@
 [![Version](https://img.shields.io/badge/Version-1.2.0-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-108%2F108%20passing-success.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-112%2F112%20passing-success.svg)]()
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
 
@@ -732,7 +732,6 @@ CCX_ISOTP_RX_Config_t rx_cfg = {
 ### Limitations
 
 - **Normal addressing only**: Extended and Mixed addressing modes not yet implemented
-- **Single instance per parser**: Uses global pointers for TX/RX instances
 - **STmin < 1ms**: Submillisecond timing (0xF1-0xF9) parsed but not implemented
 
 ---
@@ -943,16 +942,21 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 ## Changelog
 
 ### Current Release: v1.2.0 (202x-xx-xx)
+- **UserData Context in Parsers**: Added `void *UserData` to RX/TX table structures
+  - Enables multiple ISO-TP instances without global variables
+  - Parser callbacks receive context pointer for flexible instance management
+  - Breaking change: Parser signatures updated (added `void *UserData` parameter)
 - **ISO-TP Protocol**: Full ISO 15765-2 transport layer implementation
   - Single Frame and Multi-Frame support (up to 4095 bytes)
   - Flow Control with CTS/WAIT/OVFLW
   - Configurable padding and timeouts
   - Progress callbacks for large transfers
   - **Extended ID Support**: Full support for both Standard (11-bit) and Extended (29-bit) CAN identifiers
+  - Multiple concurrent instances supported via UserData context
 - **Wildcard DLC Matching**: `CCX_DLC_ANY` constant for accepting any DLC in RX table
   - Enables flexible protocol handling (ISO-TP, J1939, etc.)
   - Useful for messages with variable padding
-- **Updated Tests**: 108/108 tests passing (added ISO-TP test suite with Extended ID tests)
+- **Updated Tests**: 112/112 tests passing (added UserData tests and ISO-TP test suite with Extended ID tests)
 
 ### Previous Release: v1.1.0 (2026-01-22)
 - **Per-message timeout callbacks**: `TimeoutCallback` moved from `CCX_instance_t` to `CCX_RX_table_t` for better flexibility

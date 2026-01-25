@@ -150,9 +150,10 @@ typedef struct
     uint32_t ID;
     uint8_t DLC : 4;
     uint8_t IDE_flag : 1;
+    void *UserData;
     CCX_TIME_t TimeOut;
-    void (*Parser)(const CCX_instance_t *Instance, CCX_message_t *Msg, uint16_t Slot);
-    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot);
+    void (*Parser)(const CCX_instance_t *Instance, CCX_message_t *Msg, uint16_t Slot, void *UserData);
+    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot, void *UserData);
     CCX_TIME_t LastTick;
 } CCX_RX_table_t;
 
@@ -162,8 +163,9 @@ typedef struct
     uint8_t *Data;
     uint8_t DLC : 4;
     uint8_t IDE_flag : 1;
+    void *UserData;
     CCX_TIME_t SendFreq;
-    void (*Parser)(const CCX_instance_t *Instance, uint8_t *DataToSend, uint16_t Slot);
+    void (*Parser)(const CCX_instance_t *Instance, uint8_t *DataToSend, uint16_t Slot, void *UserData);
     CCX_TIME_t LastTick;
 } CCX_TX_table_t;
 

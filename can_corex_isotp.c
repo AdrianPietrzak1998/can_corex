@@ -22,18 +22,12 @@ extern CCX_TIME_t *CCX_tick;
 #endif
 
 /* ISO-TP frame constants */
-#define ISOTP_SF_MAX_DATA 7 /* Single Frame max data bytes */
-#define ISOTP_FF_DATA_BYTES 6 /* First Frame data bytes (after 2-byte length) */
-#define ISOTP_CF_DATA_BYTES 7 /* Consecutive Frame data bytes */
-#define ISOTP_FC_SIZE 3 /* Flow Control frame size (PCI, FS, BS, STmin) */
+#define ISOTP_SF_MAX_DATA 7    /* Single Frame max data bytes */
+#define ISOTP_FF_DATA_BYTES 6  /* First Frame data bytes (after 2-byte length) */
+#define ISOTP_CF_DATA_BYTES 7  /* Consecutive Frame data bytes */
+#define ISOTP_FC_SIZE 3        /* Flow Control frame size (PCI, FS, BS, STmin) */
 
 #define ISOTP_MAX_WAIT_FRAMES 10 /* Maximum number of WAIT FC frames to tolerate */
-
-/* Global RX instance pointer for parser callback */
-static CCX_ISOTP_RX_t *g_ISOTP_RX_Instance = NULL;
-
-/* Global TX instance pointer for FC parser callback */
-static CCX_ISOTP_TX_t *g_ISOTP_TX_Instance = NULL;
 
 /* ========================================================================
  * HELPER FUNCTIONS
@@ -121,9 +115,6 @@ CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, const CCX_ISOTP_T
     Instance->BlockCounter = 0;
     Instance->LastTick = 0;
     Instance->WaitFramesRemaining = ISOTP_MAX_WAIT_FRAMES;
-
-    /* Register this instance for FC parser */
-    CCX_ISOTP_TX_SetInstance(Instance);
 
     return CCX_ISOTP_OK;
 }
@@ -362,9 +353,6 @@ CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_R
     Instance->LastTick = 0;
     Instance->LastProgressCallback = 0;
 
-    /* Register this instance for parser */
-    CCX_ISOTP_RX_SetInstance(Instance);
-
     return CCX_ISOTP_OK;
 }
 
@@ -506,7 +494,8 @@ static inline void CCX_ISOTP_RX_HandleConsecutiveFrame(CCX_ISOTP_RX_t *Instance,
     /* Check progress callback */
     if (Instance->Config.ProgressCallbackInterval > 0 && Instance->Config.OnReceiveProgress != NULL)
     {
-        uint16_t bytes_since_last = Instance->RxDataOffset - Instance->LastProgressCallback;
+        uint16_t bytes_since_last =
+            Instance->RxDataOffset - Instance->LastProgressCallback;
         if (bytes_since_last >= Instance->Config.ProgressCallbackInterval)
         {
             Instance->Config.OnReceiveProgress(Instance, bytes_since_last, Instance->RxDataLength);
@@ -550,12 +539,14 @@ static inline void CCX_ISOTP_RX_HandleConsecutiveFrame(CCX_ISOTP_RX_t *Instance,
     }
 }
 
-void CCX_ISOTP_RX_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Msg, uint16_t Slot)
+void CCX_ISOTP_RX_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Msg, uint16_t Slot, void *UserData)
 {
     (void)CanInstance;
     (void)Slot;
 
-    if (NULL == g_ISOTP_RX_Instance || NULL == Msg)
+    CCX_ISOTP_RX_t *Instance = (CCX_ISOTP_RX_t *)UserData;
+
+    if (NULL == Instance || NULL == Msg)
     {
         return;
     }
@@ -565,15 +556,15 @@ void CCX_ISOTP_RX_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Msg, 
     switch (pci)
     {
     case CCX_ISOTP_PCI_SF:
-        CCX_ISOTP_RX_HandleSingleFrame(g_ISOTP_RX_Instance, Msg);
+        CCX_ISOTP_RX_HandleSingleFrame(Instance, Msg);
         break;
 
     case CCX_ISOTP_PCI_FF:
-        CCX_ISOTP_RX_HandleFirstFrame(g_ISOTP_RX_Instance, Msg);
+        CCX_ISOTP_RX_HandleFirstFrame(Instance, Msg);
         break;
 
     case CCX_ISOTP_PCI_CF:
-        CCX_ISOTP_RX_HandleConsecutiveFrame(g_ISOTP_RX_Instance, Msg);
+        CCX_ISOTP_RX_HandleConsecutiveFrame(Instance, Msg);
         break;
 
     default:
@@ -606,17 +597,14 @@ void CCX_ISOTP_RX_Poll(CCX_ISOTP_RX_t *Instance)
     }
 }
 
-void CCX_ISOTP_RX_SetInstance(CCX_ISOTP_RX_t *Instance)
-{
-    g_ISOTP_RX_Instance = Instance;
-}
-
-void CCX_ISOTP_TX_FC_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Msg, uint16_t Slot)
+void CCX_ISOTP_TX_FC_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Msg, uint16_t Slot, void *UserData)
 {
     (void)CanInstance;
     (void)Slot;
 
-    if (NULL == g_ISOTP_TX_Instance || NULL == Msg)
+    CCX_ISOTP_TX_t *Instance = (CCX_ISOTP_TX_t *)UserData;
+
+    if (NULL == Instance || NULL == Msg)
     {
         return;
     }
@@ -625,11 +613,6 @@ void CCX_ISOTP_TX_FC_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Ms
 
     if (pci == CCX_ISOTP_PCI_FC)
     {
-        CCX_ISOTP_TX_HandleFlowControl(g_ISOTP_TX_Instance, Msg);
+        CCX_ISOTP_TX_HandleFlowControl(Instance, Msg);
     }
-}
-
-void CCX_ISOTP_TX_SetInstance(CCX_ISOTP_TX_t *Instance)
-{
-    g_ISOTP_TX_Instance = Instance;
 }
