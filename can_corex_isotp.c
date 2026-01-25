@@ -160,7 +160,7 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
         Instance->State = CCX_ISOTP_TX_STATE_IDLE;
         if (Instance->Config.OnTransmitComplete != NULL)
         {
-            Instance->Config.OnTransmitComplete(Instance);
+            Instance->Config.OnTransmitComplete(Instance, Instance->Config.UserData);
         }
 
         return CCX_ISOTP_OK;
@@ -214,7 +214,7 @@ static inline void CCX_ISOTP_TX_HandleFlowControl(CCX_ISOTP_TX_t *Instance, cons
             Instance->State = CCX_ISOTP_TX_STATE_IDLE;
             if (Instance->Config.OnError != NULL)
             {
-                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT);
+                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT, Instance->Config.UserData);
             }
         }
         Instance->LastTick = CCX_GET_TICK;
@@ -225,7 +225,7 @@ static inline void CCX_ISOTP_TX_HandleFlowControl(CCX_ISOTP_TX_t *Instance, cons
         Instance->State = CCX_ISOTP_TX_STATE_IDLE;
         if (Instance->Config.OnError != NULL)
         {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_OVERFLOW);
+            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_OVERFLOW, Instance->Config.UserData);
         }
         break;
 
@@ -234,7 +234,7 @@ static inline void CCX_ISOTP_TX_HandleFlowControl(CCX_ISOTP_TX_t *Instance, cons
         Instance->State = CCX_ISOTP_TX_STATE_IDLE;
         if (Instance->Config.OnError != NULL)
         {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_SEQUENCE);
+            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_SEQUENCE, Instance->Config.UserData);
         }
         break;
     }
@@ -263,7 +263,7 @@ static inline void CCX_ISOTP_TX_SendConsecutiveFrame(CCX_ISOTP_TX_t *Instance)
         Instance->State = CCX_ISOTP_TX_STATE_IDLE;
         if (Instance->Config.OnTransmitComplete != NULL)
         {
-            Instance->Config.OnTransmitComplete(Instance);
+            Instance->Config.OnTransmitComplete(Instance, Instance->Config.UserData);
         }
     }
     else
@@ -305,7 +305,7 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
             Instance->State = CCX_ISOTP_TX_STATE_IDLE;
             if (Instance->Config.OnError != NULL)
             {
-                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT);
+                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT, Instance->Config.UserData);
             }
         }
         break;
@@ -382,7 +382,7 @@ static inline void CCX_ISOTP_RX_HandleSingleFrame(CCX_ISOTP_RX_t *Instance, cons
     {
         if (Instance->Config.OnError != NULL)
         {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
+            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
         }
         return;
     }
@@ -391,7 +391,7 @@ static inline void CCX_ISOTP_RX_HandleSingleFrame(CCX_ISOTP_RX_t *Instance, cons
     {
         if (Instance->Config.OnError != NULL)
         {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_BUFFER_TOO_SMALL);
+            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_BUFFER_TOO_SMALL, Instance->Config.UserData);
         }
         return;
     }
@@ -402,7 +402,7 @@ static inline void CCX_ISOTP_RX_HandleSingleFrame(CCX_ISOTP_RX_t *Instance, cons
     /* Call complete callback */
     if (Instance->Config.OnReceiveComplete != NULL)
     {
-        Instance->Config.OnReceiveComplete(Instance, Instance->Config.RxBuffer, data_len);
+        Instance->Config.OnReceiveComplete(Instance, Instance->Config.RxBuffer, data_len, Instance->Config.UserData);
     }
 }
 
@@ -416,7 +416,7 @@ static inline void CCX_ISOTP_RX_HandleFirstFrame(CCX_ISOTP_RX_t *Instance, const
         /* Already receiving, abort previous */
         if (Instance->Config.OnError != NULL)
         {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_SEQUENCE);
+            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_SEQUENCE, Instance->Config.UserData);
         }
     }
 
@@ -426,7 +426,7 @@ static inline void CCX_ISOTP_RX_HandleFirstFrame(CCX_ISOTP_RX_t *Instance, const
     {
         if (Instance->Config.OnError != NULL)
         {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
+            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
         }
         return;
     }
@@ -437,7 +437,7 @@ static inline void CCX_ISOTP_RX_HandleFirstFrame(CCX_ISOTP_RX_t *Instance, const
         CCX_ISOTP_RX_SendFlowControl(Instance, CCX_ISOTP_FC_OVFLW);
         if (Instance->Config.OnError != NULL)
         {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_BUFFER_TOO_SMALL);
+            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_BUFFER_TOO_SMALL, Instance->Config.UserData);
         }
         return;
     }
@@ -476,7 +476,7 @@ static inline void CCX_ISOTP_RX_HandleConsecutiveFrame(CCX_ISOTP_RX_t *Instance,
         Instance->State = CCX_ISOTP_RX_STATE_IDLE;
         if (Instance->Config.OnError != NULL)
         {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_SEQUENCE);
+            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_SEQUENCE, Instance->Config.UserData);
         }
         return;
     }
@@ -498,7 +498,7 @@ static inline void CCX_ISOTP_RX_HandleConsecutiveFrame(CCX_ISOTP_RX_t *Instance,
             Instance->RxDataOffset - Instance->LastProgressCallback;
         if (bytes_since_last >= Instance->Config.ProgressCallbackInterval)
         {
-            Instance->Config.OnReceiveProgress(Instance, bytes_since_last, Instance->RxDataLength);
+            Instance->Config.OnReceiveProgress(Instance, bytes_since_last, Instance->RxDataLength, Instance->Config.UserData);
             Instance->LastProgressCallback = Instance->RxDataOffset;
         }
     }
@@ -514,14 +514,14 @@ static inline void CCX_ISOTP_RX_HandleConsecutiveFrame(CCX_ISOTP_RX_t *Instance,
             uint16_t bytes_since_last = Instance->RxDataOffset - Instance->LastProgressCallback;
             if (bytes_since_last > 0)
             {
-                Instance->Config.OnReceiveProgress(Instance, bytes_since_last, Instance->RxDataLength);
+                Instance->Config.OnReceiveProgress(Instance, bytes_since_last, Instance->RxDataLength, Instance->Config.UserData);
             }
         }
 
         /* Call complete callback */
         if (Instance->Config.OnReceiveComplete != NULL)
         {
-            Instance->Config.OnReceiveComplete(Instance, Instance->Config.RxBuffer, Instance->RxDataLength);
+            Instance->Config.OnReceiveComplete(Instance, Instance->Config.RxBuffer, Instance->RxDataLength, Instance->Config.UserData);
         }
         return;
     }
@@ -592,7 +592,7 @@ void CCX_ISOTP_RX_Poll(CCX_ISOTP_RX_t *Instance)
         Instance->State = CCX_ISOTP_RX_STATE_IDLE;
         if (Instance->Config.OnError != NULL)
         {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT);
+            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT, Instance->Config.UserData);
         }
     }
 }

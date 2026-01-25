@@ -108,10 +108,12 @@ typedef struct
     CCX_TIME_t N_Bs;              /* Timeout for reception of FC after FF/CF (default: 1000ms) */
     CCX_TIME_t N_Cs;              /* Timeout between CF transmissions (default: 1000ms) */
     CCX_ISOTP_Padding_t Padding;  /* Padding configuration */
+    
+    void *UserData;               /* User context pointer passed to callbacks */
 
     /* Callbacks */
-    void (*OnTransmitComplete)(CCX_ISOTP_TX_t *Instance);
-    void (*OnError)(CCX_ISOTP_TX_t *Instance, CCX_ISOTP_Status_t Error);
+    void (*OnTransmitComplete)(CCX_ISOTP_TX_t *Instance, void *UserData);
+    void (*OnError)(CCX_ISOTP_TX_t *Instance, CCX_ISOTP_Status_t Error, void *UserData);
 } CCX_ISOTP_TX_Config_t;
 
 /**
@@ -134,11 +136,13 @@ typedef struct
     uint8_t *RxBuffer;                    /* Buffer for received data */
     uint16_t RxBufferSize;                /* Size of RX buffer */
     uint16_t ProgressCallbackInterval;    /* Call progress callback every N bytes (0 = disabled) */
+    
+    void *UserData;                       /* User context pointer passed to callbacks */
 
     /* Callbacks */
-    void (*OnReceiveComplete)(CCX_ISOTP_RX_t *Instance, const uint8_t *Data, uint16_t Length);
-    void (*OnReceiveProgress)(CCX_ISOTP_RX_t *Instance, uint16_t BytesReceived, uint16_t TotalLength);
-    void (*OnError)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Status_t Error);
+    void (*OnReceiveComplete)(CCX_ISOTP_RX_t *Instance, const uint8_t *Data, uint16_t Length, void *UserData);
+    void (*OnReceiveProgress)(CCX_ISOTP_RX_t *Instance, uint16_t BytesReceived, uint16_t TotalLength, void *UserData);
+    void (*OnError)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Status_t Error, void *UserData);
 } CCX_ISOTP_RX_Config_t;
 
 /**
