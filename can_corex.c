@@ -98,11 +98,23 @@ static inline CCX_MsgRegStatus_t CCX_RX_MsgFromTables(CCX_instance_t *Instance, 
     {
         if (Instance->CCX_RX_table[i].ID == Msg->ID)
         {
-            if ((Instance->CCX_RX_table[i].DLC == Msg->DLC) && (Instance->CCX_RX_table[i].IDE_flag == Msg->IDE_flag))
+            /* Check DLC: CCX_DLC_ANY accepts any DLC (0-8), otherwise exact match */
+            uint8_t dlc_match = 0;
+            if (Instance->CCX_RX_table[i].DLC == CCX_DLC_ANY)
+            {
+                dlc_match = 1; /* Any DLC accepted */
+            }
+            else
+            {
+                dlc_match = (Instance->CCX_RX_table[i].DLC == Msg->DLC); /* Exact match */
+            }
+
+            if (dlc_match && (Instance->CCX_RX_table[i].IDE_flag == Msg->IDE_flag))
+
             {
                 if (NULL != Instance->CCX_RX_table[i].Parser)
                 {
-                    Instance->CCX_RX_table[i].Parser(Instance, Msg, i);
+                    Instance->CCX_RX_table[i].Parser(Instance, Msg, i, Instance->CCX_RX_table[i].UserData);
                 }
                 Instance->CCX_RX_table[i].LastTick = Instance->RxReceivedTick[Instance->RxTail];
                 return CCX_MSG_REG;
@@ -124,7 +136,7 @@ static inline void CCX_Timeout_Check(CCX_instance_t *Instance)
                 Instance->CCX_RX_table[i].LastTick = CCX_GET_TICK;
                 if (NULL != Instance->CCX_RX_table[i].TimeoutCallback)
                 {
-                    Instance->CCX_RX_table[i].TimeoutCallback(Instance, i);
+                    Instance->CCX_RX_table[i].TimeoutCallback(Instance, i, Instance->CCX_RX_table[i].UserData);
                 }
             }
         }
@@ -198,7 +210,7 @@ static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
             CopyBuf(Instance->CCX_TX_table[i].Data, Tmp, Instance->CCX_TX_table[i].DLC);
             if (NULL != Instance->CCX_TX_table[i].Parser)
             {
-                Instance->CCX_TX_table[i].Parser(Instance, Tmp, i);
+                Instance->CCX_TX_table[i].Parser(Instance, Tmp, i, Instance->CCX_TX_table[i].UserData);
             }
             CCX_message_t msg = {.ID = Instance->CCX_TX_table[i].ID,
                                  .DLC = Instance->CCX_TX_table[i].DLC,
@@ -270,7 +282,11 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
 
     memset(Instance->RxBuf, 0, sizeof(Instance->RxBuf));
     memset(Instance->TxBuf, 0, sizeof(Instance->TxBuf));
-    memset(Instance->RxReceivedTick, 0, sizeof(Instance->RxReceivedTick));
+
+    for (uint16_t i = 0; i < CCX_RX_BUFFER_SIZE; i++)
+    {
+        Instance->RxReceivedTick[i] = 0;
+    }
 
     CCX_TIME_t current_tick = CCX_GET_TICK;
 

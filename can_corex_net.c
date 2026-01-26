@@ -12,6 +12,12 @@
 #include "string.h"
 #include <assert.h>
 
+/**
+ * @brief Global list of all CAN networks
+ *
+ * Head of linked list containing all initialized networks.
+ * NULL when no networks exist.
+ */
 CCX_net_t *CCX_nets = NULL;
 
 CCX_net_status_t CCX_net_clear_nodes(CCX_net_t *net)
@@ -31,13 +37,22 @@ CCX_net_status_t CCX_net_clear_nodes(CCX_net_t *net)
     return CCX_NET_OK;
 }
 
+/**
+ * @brief Internal helper - Push message to TX buffer of a CAN instance
+ *
+ * Used by network replication to forward messages to other nodes.
+ * Bypasses normal CCX_TX_PushMsg to avoid circular replication.
+ *
+ * @param Instance CAN instance to push to
+ * @param msg Message to push
+ */
 static void CCX_net_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
 {
     assert(Instance != NULL);
     assert(msg != NULL);
 
     uint16_t next_head = Instance->TxHead + 1;
-    if (next_head >= CCX_TX_BUFFER_SIZE) /* FIXED: was CCX_RX_BUFFER_SIZE */
+    if (next_head >= CCX_TX_BUFFER_SIZE)
     {
         next_head = 0;
     }
@@ -52,6 +67,15 @@ static void CCX_net_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *ms
     memcpy(&Instance->TxBuf[Instance->TxHead], msg, sizeof(CCX_message_t));
 }
 
+/**
+ * @brief Internal helper - Push message to RX buffer of a CAN instance
+ *
+ * Used by network replication for TX_RX_REPLICATION mode.
+ * Bypasses normal CCX_RX_PushMsg to avoid circular replication.
+ *
+ * @param Instance CAN instance to push to
+ * @param msg Message to push
+ */
 static void CCX_net_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
 {
     assert(Instance != NULL);
@@ -138,6 +162,18 @@ CCX_net_status_t CCX_net_deinit(CCX_net_t *net)
     return CCX_NET_DOES_NOT_EXISTING;
 }
 
+/**
+ * @brief Network message distribution function
+ *
+ * Called automatically by CCX_RX_PushMsg and CCX_TX_PushMsg to replicate
+ * messages across network nodes.
+ *
+ * @param Instance Source CAN instance that received/transmitted the message
+ * @param msg Message to distribute
+ * @param FromTxFunc 1 if called from TX function, 0 if from RX function
+ *
+ * @note This function is called internally by CAN CoreX and should not be called directly
+ */
 void CCX_net_push(const CCX_instance_t *Instance, const CCX_message_t *msg, uint8_t FromTxFunc)
 {
     if (CCX_nets == NULL)

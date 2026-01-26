@@ -41,6 +41,22 @@
 #define CCX_TX_BUFFER_SIZE 48
 
 /**
+ * @def CCX_DLC_ANY
+ * @brief Special DLC value for wildcard matching in RX table.
+ *
+ * When this value is used in CCX_RX_table_t.DLC field, the parser will be called
+ * for any received DLC (0-8), regardless of the actual message DLC.
+ * This is useful for protocols that may send messages with variable DLC.
+ *
+ * Example:
+ * CCX_RX_table_t rx_table[] = {
+ *     {.ID = 0x100, .DLC = 8, .Parser = my_parser},        // Exact match: only DLC=8
+ *     {.ID = 0x200, .DLC = CCX_DLC_ANY, .Parser = my_parser} // Any DLC: 0-8
+ * };
+ */
+#define CCX_DLC_ANY 15
+
+/**
  * @brief System time base type and maximum timeout definition.
  *
  * By default, the system tick type is `volatile uint32_t`.
@@ -128,25 +144,98 @@ typedef struct
 
 typedef struct CCX_instance_t CCX_instance_t;
 
+/**
+ * @brief CAN RX table entry structure
+ *
+ * Defines a single entry in the RX message table for filtering and parsing incoming CAN messages.
+ *
+ * @note UserData Example:
+ * @code
+ * typedef struct {
+ *     int counter;
+ *     const char *name;
+ * } MessageContext_t;
+ *
+ * MessageContext_t msg_ctx = {.counter = 0, .name = "RPM"};
+ *
+ * void rpm_parser(const CCX_instance_t *Instance, CCX_message_t *Msg,
+ *                 uint16_t Slot, void *UserData) {
+ *     MessageContext_t *ctx = (MessageContext_t *)UserData;
+ *     ctx->counter++;
+ *     printf("%s message #%d received\n", ctx->name, ctx->counter);
+ * }
+ *
+ * CCX_RX_table_t rx_table[] = {
+ *     {
+ *         .ID = 0x200,
+ *         .DLC = 8,
+ *         .IDE_flag = 0,
+ *         .UserData = &msg_ctx,
+ *         .TimeOut = 1000,
+ *         .Parser = rpm_parser,
+ *         .TimeoutCallback = rpm_timeout
+ *     }
+ * };
+ * @endcode
+ */
 typedef struct
 {
     uint32_t ID;
     uint8_t DLC : 4;
     uint8_t IDE_flag : 1;
+    void *UserData;
     CCX_TIME_t TimeOut;
-    void (*Parser)(const CCX_instance_t *Instance, CCX_message_t *Msg, uint16_t Slot);
-    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot);
+    void (*Parser)(const CCX_instance_t *Instance, CCX_message_t *Msg, uint16_t Slot, void *UserData);
+    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot, void *UserData);
     CCX_TIME_t LastTick;
 } CCX_RX_table_t;
 
+/**
+ * @brief CAN TX table entry structure
+ *
+ * Defines a single entry in the TX message table for periodic message transmission.
+ *
+ * @note UserData Example:
+ * @code
+ * typedef struct {
+ *     uint16_t *sensor_value;  // Pointer to live sensor data
+ *     uint8_t scaling_factor;
+ * } SensorContext_t;
+ *
+ * uint16_t temperature = 25;
+ * SensorContext_t temp_ctx = {.sensor_value = &temperature, .scaling_factor = 10};
+ *
+ * void temp_tx_parser(const CCX_instance_t *Instance, uint8_t *DataToSend,
+ *                     uint16_t Slot, void *UserData) {
+ *     SensorContext_t *ctx = (SensorContext_t *)UserData;
+ *     uint16_t scaled = *(ctx->sensor_value) * ctx->scaling_factor;
+ *     DataToSend[0] = (uint8_t)(scaled >> 8);
+ *     DataToSend[1] = (uint8_t)(scaled & 0xFF);
+ * }
+ *
+ * uint8_t tx_data[8] = {0};
+ * CCX_TX_table_t tx_table[] = {
+ *     {
+ *         .ID = 0x300,
+ *         .Data = tx_data,
+ *         .DLC = 8,
+ *         .IDE_flag = 0,
+ *         .UserData = &temp_ctx,
+ *         .SendFreq = 100,  // Send every 100ms
+ *         .Parser = temp_tx_parser
+ *     }
+ * };
+ * @endcode
+ */
 typedef struct
 {
     uint32_t ID;
     uint8_t *Data;
     uint8_t DLC : 4;
     uint8_t IDE_flag : 1;
+    void *UserData;
     CCX_TIME_t SendFreq;
-    void (*Parser)(const CCX_instance_t *Instance, uint8_t *DataToSend, uint16_t Slot);
+    void (*Parser)(const CCX_instance_t *Instance, uint8_t *DataToSend, uint16_t Slot, void *UserData);
     CCX_TIME_t LastTick;
 } CCX_TX_table_t;
 
