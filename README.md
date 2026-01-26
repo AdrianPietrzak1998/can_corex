@@ -949,7 +949,7 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v1.2.0 (202x-xx-xx)
+### Current Release: v1.2.0 (2026-01-26)
 - **UserData Context in Parsers**: Added `void *UserData` to RX/TX table structures
   - Enables multiple ISO-TP instances without global variables
   - Parser callbacks receive context pointer for flexible instance management
