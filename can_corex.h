@@ -56,6 +56,27 @@
  */
 #define CCX_DLC_ANY 15
 
+/* ============================================================
+ * ISO 11898-1 BUS-OFF recovery timing
+ *
+ * Condition:
+ *   128 × 11 recessive bits = 1408 bits
+ *
+ * Time is bitrate dependent.
+ * Values are CEILED to integer milliseconds.
+ * ============================================================ */
+
+#define CAN_COREX_BUS_OFF_RECOVERY_10KBPS_MS 141
+#define CAN_COREX_BUS_OFF_RECOVERY_20KBPS_MS 71
+#define CAN_COREX_BUS_OFF_RECOVERY_50KBPS_MS 29
+#define CAN_COREX_BUS_OFF_RECOVERY_83K3BPS_MS 17
+#define CAN_COREX_BUS_OFF_RECOVERY_100KBPS_MS 15
+#define CAN_COREX_BUS_OFF_RECOVERY_125KBPS_MS 12
+#define CAN_COREX_BUS_OFF_RECOVERY_250KBPS_MS 6
+#define CAN_COREX_BUS_OFF_RECOVERY_500KBPS_MS 3
+#define CAN_COREX_BUS_OFF_RECOVERY_800KBPS_MS 2
+#define CAN_COREX_BUS_OFF_RECOVERY_1000KBPS_MS 2
+
 /**
  * @brief System time base type and maximum timeout definition.
  *
@@ -259,7 +280,8 @@ typedef struct
     CCX_BusStats_t stats;         /**< Accumulated statistics */
 
     /* Recovery parameters */
-    CCX_TIME_t recovery_delay;      /**< Delay between recovery attempts (ms, default: 10) */
+    CCX_TIME_t recovery_delay;      /**< Delay between recovery attempts (ms, default: 10) Minimum in macros
+                                       CAN_COREX_BUS_OFF_RECOVERY_*_MS*/
     CCX_TIME_t successful_run_time; /**< Time to run successfully before resetting counter (ms, default: 60000) */
     uint8_t auto_recovery_enabled;  /**< Enable automatic bus-off recovery */
     uint8_t max_recovery_attempts;  /**< Max attempts before grace period (0 = unlimited) */
