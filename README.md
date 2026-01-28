@@ -1133,7 +1133,7 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v1.3.0 (2026-01-27)
+### Current Release: v1.3.0 (2026-01-28)
 - **Bus Management**: Automatic bus-off detection and recovery
   - Configurable retry strategy with grace period
   - TEC/REC error counter monitoring according to ISO 11898-1
@@ -1154,7 +1154,7 @@ Mozilla Public License 2.0 - see LICENSE file for details.
   - `CCX_GetGlobalStats()` - Get global statistics
   - `CCX_ResetGlobalStats()` - Reset global statistics
   - `CCX_OnMessageTransmitted()` - Notify library of successful transmission
-- **Enhanced Testing**: 44/44 tests passing
+- **Enhanced Testing**: 225/225 tests passing
   - Global statistics validation (RX/TX counters, buffer overflows)
   - Bus monitoring state machine tests
   - Auto-recovery and grace period verification
