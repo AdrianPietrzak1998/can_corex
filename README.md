@@ -1,17 +1,17 @@
 # CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-1.2.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-1.3.0-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-154%2F154%20passing-success.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-225%2F225%20passing-success.svg)]()
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
 
 
 ## Overview
 
-CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, and ISO-TP transport protocol capabilities.
+CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, ISO-TP transport protocol, and comprehensive bus health monitoring with automatic error recovery.
 
 ## Table of Contents
 
@@ -22,7 +22,8 @@ CAN CoreX is a lightweight, modular CAN bus communication library designed for e
 5. [Usage Examples](#usage-examples)
 6. [ISO-TP Transport Protocol](#iso-tp-transport-protocol)
 7. [Wildcard DLC Matching](#wildcard-dlc-matching)
-8. [Best Practices](#best-practices)
+8. [Bus Management & Statistics](#bus-management--statistics)
+9. [Best Practices](#best-practices)
 
 ---
 
@@ -38,6 +39,8 @@ CAN CoreX is a lightweight, modular CAN bus communication library designed for e
 - **ISO-TP Protocol**: ISO 15765-2 transport layer for multi-frame messages
 - **Extended ID Support**: Full support for both Standard (11-bit) and Extended (29-bit) CAN IDs
 - **Wildcard Matching**: Accept any DLC with `CCX_DLC_ANY` in RX table
+- **Bus Management**: Automatic bus-off detection and recovery with configurable retry strategy
+- **Global Statistics**: Real-time monitoring of RX/TX counters, buffer overflows, and parser calls
 
 ---
 ## API Reference
@@ -787,6 +790,189 @@ CCX_RX_PushMsg(&can, &msg2);  // Parser called (DLC=8 accepted)
 - ISO-TP macros automatically use `CCX_DLC_ANY` for flexibility
 
 
+---
+
+## Bus Management & Statistics
+
+CAN CoreX v1.3.0 introduces comprehensive bus health monitoring and statistics tracking.
+
+### Global Statistics
+
+Always-on statistics tracking with minimal overhead. Automatically maintained by the library.
+
+**Available Metrics:**
+- `total_rx_messages` - Total messages received and pushed to RX buffer
+- `total_tx_messages` - Total messages successfully transmitted (requires `CCX_OnMessageTransmitted()` call from ISR)
+- `rx_buffer_overflows` - Number of times RX buffer was full
+- `tx_buffer_overflows` - Number of times TX buffer was full
+- `parser_calls_count` - Total parser function invocations
+- `timeout_calls_count` - Total timeout callback invocations
+
+**Usage:**
+```c
+// Get statistics
+const CCX_GlobalStats_t *stats = CCX_GetGlobalStats(&can_instance);
+printf("RX: %lu, TX: %lu, Overflows: %lu/%lu\n",
+       stats->total_rx_messages,
+       stats->total_tx_messages,
+       stats->rx_buffer_overflows,
+       stats->tx_buffer_overflows);
+
+// Reset statistics
+CCX_ResetGlobalStats(&can_instance);
+```
+
+**Important:** For accurate TX counting, call `CCX_OnMessageTransmitted()` from your CAN TX complete interrupt:
+```c
+void CAN_TX_IRQHandler(void) {
+    // Clear interrupt flag
+    // ...
+    
+    // Notify library
+    CCX_OnMessageTransmitted(&can_instance, NULL);
+}
+```
+
+### Bus Monitoring
+
+Automatic bus-off detection and recovery with configurable retry strategy according to ISO 11898-1.
+
+**Features:**
+- Automatic bus state monitoring (Active/Warning/Passive/Off)
+- TEC/REC error counter tracking
+- Configurable recovery delay and retry attempts
+- Grace period after max recovery attempts
+- State transition callbacks
+- Manual recovery trigger
+
+**Bus States (ISO 11898-1):**
+- `CCX_BUS_STATE_ACTIVE` - Normal operation (TEC < 96 && REC < 96)
+- `CCX_BUS_STATE_WARNING` - Degraded performance (TEC > 96 || REC > 96)
+- `CCX_BUS_STATE_PASSIVE` - Cannot send active error frames (TEC > 127 || REC > 127)
+- `CCX_BUS_STATE_OFF` - Disconnected from bus (TEC > 255)
+
+**Initialization:**
+```c
+CCX_BusMonitor_t bus_monitor;
+
+CCX_BusMonitor_Init(
+    &can_instance,
+    &bus_monitor,
+    my_get_bus_state,        // Read state from hardware
+    my_get_error_counters,   // Read TEC/REC (optional)
+    my_request_recovery,     // Trigger recovery
+    10,      // recovery_delay: 10ms between attempts
+    60000,   // successful_run_time: 60s grace period
+    1,       // auto_recovery_enabled
+    5        // max_recovery_attempts before grace period
+);
+
+// Optional callbacks
+bus_monitor.OnBusStateChange = my_state_callback;
+bus_monitor.OnRecoveryAttempt = my_recovery_callback;
+bus_monitor.OnRecoveryFailed = my_failed_callback;
+bus_monitor.OnErrorCountersUpdate = my_counters_callback;
+```
+
+**Recovery Strategy:**
+
+1. **Active Recovery Phase:**
+   - Attempts recovery up to `max_recovery_attempts` times
+   - Waits `recovery_delay` between attempts
+   - Calls `OnRecoveryAttempt` before each try
+
+2. **Grace Period:**
+   - After max attempts, waits `successful_run_time` before trying again
+   - Calls `OnRecoveryFailed` when entering grace period
+   - Prevents aggressive retry loops
+
+3. **Counter Reset:**
+   - After successful operation for `successful_run_time`, attempt counter resets to 0
+
+**Manual Recovery:**
+```c
+// Trigger recovery manually (resets counter and grace period)
+CCX_Status_t status = CCX_BusMonitor_TriggerRecovery(&can_instance);
+```
+
+**Statistics:**
+```c
+// Access bus statistics
+const CCX_BusStats_t *stats = &bus_monitor.stats;
+printf("Bus-off count: %lu\n", stats->bus_off_count);
+printf("TEC: %u, REC: %u\n", 
+       stats->error_counters.TEC,
+       stats->error_counters.REC);
+printf("Peak TEC: %u, Peak REC: %u\n",
+       stats->peak_error_counters.TEC,
+       stats->peak_error_counters.REC);
+
+// Reset bus monitoring statistics
+CCX_BusMonitor_ResetStats(&can_instance);
+```
+
+**Hardware Interface Functions:**
+
+You must implement three functions for your hardware:
+
+```c
+// Read current bus state
+CCX_BusState_t my_get_bus_state(const CCX_instance_t *inst) {
+    // Read from CAN controller registers
+    // Return CCX_BUS_STATE_ACTIVE/WARNING/PASSIVE/OFF
+}
+
+// Read error counters (optional - can be NULL)
+void my_get_error_counters(const CCX_instance_t *inst, CCX_ErrorCounters_t *cnt) {
+    // Read TEC/REC from CAN controller
+    cnt->TEC = /* read transmit error counter */;
+    cnt->REC = /* read receive error counter */;
+}
+
+// Trigger bus-off recovery
+void my_request_recovery(const CCX_instance_t *inst) {
+    // Trigger recovery in CAN controller
+    // e.g., clear bus-off bit, request re-initialization
+}
+```
+
+**Callbacks:**
+```c
+void my_state_callback(CCX_instance_t *inst, 
+                       CCX_BusState_t old_state,
+                       CCX_BusState_t new_state,
+                       void *user_data) {
+    if (new_state == CCX_BUS_STATE_OFF) {
+        // Bus-off occurred - recovery will start automatically
+    } else if (new_state == CCX_BUS_STATE_ACTIVE && 
+               old_state == CCX_BUS_STATE_OFF) {
+        // Recovery successful
+    }
+}
+
+void my_recovery_callback(CCX_instance_t *inst,
+                          uint8_t attempt,
+                          void *user_data) {
+    printf("Recovery attempt %u\n", attempt);
+}
+
+void my_failed_callback(CCX_instance_t *inst, void *user_data) {
+    printf("Max recovery attempts reached - entering grace period\n");
+}
+```
+
+**Integration with CCX_Poll:**
+
+Bus monitoring is automatic - just call `CCX_Poll()` as usual:
+```c
+while (1) {
+    CCX_Poll(&can_instance);  // Automatically updates bus monitor
+    // ...
+}
+```
+
+---
+
 ## Best Practices
 
 ### 1. Always Register Tick Source First
@@ -882,12 +1068,10 @@ rx_table[0].TimeoutCallback = critical_sensor_timeout_handler;
 ### Poll Frequency
 
 - Call `CCX_Poll()` at least 2x faster than shortest timeout
-- Example: 100ms timeout â†’ poll every 50ms or faster
 
 ### Timeout Accuracy
 
 - Timeout triggers when: `current_tick - LastTick >= TimeOut`
-- Actual timeout = TimeOut Â± poll_period
 - For 100ms timeout with 10ms poll: actual = 100-110ms
 
 ---
@@ -949,7 +1133,36 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v1.2.0 (2026-01-26)
+### Current Release: v1.3.0 (2026-01-28)
+- **Bus Management**: Automatic bus-off detection and recovery
+  - Configurable retry strategy with grace period
+  - TEC/REC error counter monitoring according to ISO 11898-1
+  - State transition callbacks (OnBusStateChange, OnRecoveryAttempt, OnRecoveryFailed)
+  - Manual recovery trigger via `CCX_BusMonitor_TriggerRecovery()`
+  - Detailed statistics tracking (bus-off count, error states, total bus-off duration)
+- **Global Statistics**: Always-on operational metrics
+  - RX/TX message counters
+  - Buffer overflow tracking
+  - Parser/timeout call counters
+  - `CCX_OnMessageTransmitted()` function for accurate TX counting from ISR
+  - Minimal performance overhead
+- **API Additions**:
+  - `CCX_BusMonitor_Init()` - Initialize bus monitoring
+  - `CCX_BusMonitor_TriggerRecovery()` - Manual recovery trigger
+  - `CCX_BusMonitor_GetState()` - Get current bus state
+  - `CCX_BusMonitor_ResetStats()` - Reset bus statistics
+  - `CCX_GetGlobalStats()` - Get global statistics
+  - `CCX_ResetGlobalStats()` - Reset global statistics
+  - `CCX_OnMessageTransmitted()` - Notify library of successful transmission
+- **Enhanced Testing**: 225/225 tests passing
+  - Global statistics validation (RX/TX counters, buffer overflows)
+  - Bus monitoring state machine tests
+  - Auto-recovery and grace period verification
+  - Manual recovery trigger tests
+  - TEC/REC tracking validation
+- **Breaking Changes**: None - fully backward compatible with v1.2.0
+
+### Previous Release: v1.2.0 (2026-01-26)
 - **UserData Context in Parsers**: Added `void *UserData` to RX/TX table structures
   - Enables multiple ISO-TP instances without global variables
   - Parser callbacks receive context pointer for flexible instance management
