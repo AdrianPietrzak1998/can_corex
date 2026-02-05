@@ -14,6 +14,8 @@
 #include <limits.h>
 #include <stdint.h>
 
+#define DCCX_RX_SEARCH_HASH
+
 /**
  * @def CCX_TICK_FROM_FUNC
  * @brief Enables system tick retrieval via a function call.
@@ -56,11 +58,23 @@
  */
 #define CCX_DLC_ANY 15
 
+/**
+ * @def CCX_RX_HASH_SIZE
+ * @brief Size of the hash table for RX message lookup (used when CCX_RX_SEARCH_HASH is defined).
+ *
+ * Default value is 64. Can be overridden before including this header.
+ * Larger values reduce collisions but increase memory usage.
+ * Recommended to use a power of 2 or prime number.
+ */
+#ifndef CCX_RX_HASH_SIZE
+#define CCX_RX_HASH_SIZE 64
+#endif
+
 /* ============================================================
  * ISO 11898-1 BUS-OFF recovery timing
  *
  * Condition:
- *   128 × 11 recessive bits = 1408 bits
+ *   128 x 11 recessive bits = 1408 bits
  *
  * Time is bitrate dependent.
  * Values are CEILED to integer milliseconds.
@@ -428,6 +442,10 @@ struct CCX_instance_t
     void (*OnMessageTransmitted)(
         CCX_instance_t *Instance,
         const CCX_message_t *msg); /**< Callback for TX complete (optional, for user notification) */
+
+#if defined(CCX_RX_SEARCH_HASH)
+    uint16_t RxHashTable[CCX_RX_HASH_SIZE]; /**< Hash table for fast RX message lookup */
+#endif
 };
 
 CCX_Status_t CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg);
@@ -582,5 +600,28 @@ void CCX_ResetGlobalStats(CCX_instance_t *Instance);
  * @endcode
  */
 void CCX_OnMessageTransmitted(CCX_instance_t *Instance, const CCX_message_t *msg);
+
+/**
+ * @brief Rebuild hash table for RX message lookup
+ *
+ * This function rebuilds the internal hash table used for fast RX message lookup
+ * when CCX_RX_SEARCH_HASH is defined at compile time.
+ *
+ * Call this function after modifying the RX table (CCX_RX_table) to update the hash table.
+ * The hash table is automatically built during CCX_Init(), so manual rebuild is only needed
+ * if you dynamically modify the RX table after initialization.
+ *
+ * @param Instance CAN instance
+ *
+ * @note This function does nothing if CCX_RX_SEARCH_HASH is not defined
+ * @note Not needed for linear search or binary search modes
+ *
+ * @code
+ * // After modifying RX table
+ * rx_table[5].ID = 0x456;
+ * CCX_RX_RebuildHash(&can_instance);
+ * @endcode
+ */
+void CCX_RX_RebuildHash(CCX_instance_t *Instance);
 
 #endif /* CAN_COREX_CAN_COREX_H_ */
