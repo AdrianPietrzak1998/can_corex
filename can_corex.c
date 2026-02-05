@@ -13,6 +13,11 @@
 #include "string.h"
 #include <stddef.h>
 
+/* Hash table configuration for CCX_RX_SEARCH_HASH mode */
+#if defined(CCX_RX_SEARCH_HASH)
+#define HASH_EMPTY 0xFFFF
+#endif
+
 #if CCX_TICK_FROM_FUNC
 
 CCX_TIME_t (*CCX_get_tick)(void) = NULL;
@@ -91,6 +96,79 @@ CCX_Status_t CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
     return CCX_OK;
 }
 
+#if defined(CCX_RX_SEARCH_HASH)
+/**
+ * @brief Calculate hash value for CAN message ID
+ *
+ * Simple hash function using XOR and modulo.
+ */
+static inline uint16_t CCX_Hash(uint32_t ID)
+{
+    return (uint16_t)((ID ^ (ID >> 16)) % CCX_RX_HASH_SIZE);
+}
+
+/**
+ * @brief Build hash table for RX message lookup
+ *
+ * Clears the hash table and rebuilds it from the current RX table.
+ * Uses linear probing for collision resolution.
+ */
+static void CCX_RX_BuildHash(CCX_instance_t *Instance)
+{
+    assert(Instance != NULL);
+
+    /* Clear hash table */
+    for (uint16_t i = 0; i < CCX_RX_HASH_SIZE; i++)
+    {
+        Instance->RxHashTable[i] = HASH_EMPTY;
+    }
+
+    /* Build hash - linear probing for collisions */
+    for (uint16_t i = 0; i < Instance->RxTableSize; i++)
+    {
+        uint16_t hash = CCX_Hash(Instance->CCX_RX_table[i].ID);
+
+        /* Linear probing until we find an empty slot */
+        while (Instance->RxHashTable[hash] != HASH_EMPTY)
+        {
+            hash = (hash + 1) % CCX_RX_HASH_SIZE;
+        }
+
+        Instance->RxHashTable[hash] = i;
+    }
+}
+#endif
+
+/**
+ * @brief Helper function to process matched RX message
+ */
+static inline CCX_MsgRegStatus_t CCX_RX_ProcessMatch(CCX_instance_t *Instance, CCX_message_t *Msg, uint16_t index)
+{
+    /* Check DLC: CCX_DLC_ANY accepts any DLC (0-8), otherwise exact match */
+    uint8_t dlc_match = 0;
+    if (Instance->CCX_RX_table[index].DLC == CCX_DLC_ANY)
+    {
+        dlc_match = 1; /* Any DLC accepted */
+    }
+    else
+    {
+        dlc_match = (Instance->CCX_RX_table[index].DLC == Msg->DLC); /* Exact match */
+    }
+
+    if (dlc_match && (Instance->CCX_RX_table[index].IDE_flag == Msg->IDE_flag))
+    {
+        if (NULL != Instance->CCX_RX_table[index].Parser)
+        {
+            Instance->GlobalStats.parser_calls_count++; /* Track parser calls (v1.3.0) */
+            Instance->CCX_RX_table[index].Parser(Instance, Msg, index, Instance->CCX_RX_table[index].UserData);
+        }
+        Instance->CCX_RX_table[index].LastTick = Instance->RxReceivedTick[Instance->RxTail];
+        return CCX_MSG_REG;
+    }
+
+    return CCX_MSG_UNREG;
+}
+
 static inline CCX_MsgRegStatus_t CCX_RX_MsgFromTables(CCX_instance_t *Instance, CCX_message_t *Msg)
 {
     assert(Instance != NULL);
@@ -100,35 +178,81 @@ static inline CCX_MsgRegStatus_t CCX_RX_MsgFromTables(CCX_instance_t *Instance, 
         return CCX_MSG_UNREG;
     }
 
+#if defined(CCX_RX_SEARCH_HASH)
+    /* Hash table search with linear probing */
+    uint16_t hash = CCX_Hash(Msg->ID);
+    uint16_t start_hash = hash;
+
+    do
+    {
+        if (Instance->RxHashTable[hash] == HASH_EMPTY)
+        {
+            /* Empty slot - message not registered */
+            return CCX_MSG_UNREG;
+        }
+
+        uint16_t index = Instance->RxHashTable[hash];
+
+        if (Instance->CCX_RX_table[index].ID == Msg->ID)
+        {
+            /* ID match - check DLC and IDE */
+            CCX_MsgRegStatus_t result = CCX_RX_ProcessMatch(Instance, Msg, index);
+            if (result == CCX_MSG_REG)
+            {
+                return CCX_MSG_REG;
+            }
+        }
+
+        /* Try next slot (linear probing) */
+        hash = (hash + 1) % CCX_RX_HASH_SIZE;
+
+    } while (hash != start_hash);
+
+    return CCX_MSG_UNREG;
+
+#elif defined(CCX_RX_SEARCH_BINARY)
+    /* Binary search - requires sorted RX table by ID */
+    uint16_t left = 0;
+    uint16_t right = Instance->RxTableSize;
+
+    while (left < right)
+    {
+        uint16_t mid = left + (right - left) / 2;
+
+        if (Instance->CCX_RX_table[mid].ID < Msg->ID)
+        {
+            left = mid + 1;
+        }
+        else if (Instance->CCX_RX_table[mid].ID > Msg->ID)
+        {
+            right = mid;
+        }
+        else
+        {
+            /* ID match - check DLC and IDE */
+            return CCX_RX_ProcessMatch(Instance, Msg, mid);
+        }
+    }
+
+    return CCX_MSG_UNREG;
+
+#else
+    /* Linear search (default) */
     for (uint16_t i = 0; i < Instance->RxTableSize; i++)
     {
         if (Instance->CCX_RX_table[i].ID == Msg->ID)
         {
-            /* Check DLC: CCX_DLC_ANY accepts any DLC (0-8), otherwise exact match */
-            uint8_t dlc_match = 0;
-            if (Instance->CCX_RX_table[i].DLC == CCX_DLC_ANY)
+            /* ID match - check DLC and IDE */
+            CCX_MsgRegStatus_t result = CCX_RX_ProcessMatch(Instance, Msg, i);
+            if (result == CCX_MSG_REG)
             {
-                dlc_match = 1; /* Any DLC accepted */
-            }
-            else
-            {
-                dlc_match = (Instance->CCX_RX_table[i].DLC == Msg->DLC); /* Exact match */
-            }
-
-            if (dlc_match && (Instance->CCX_RX_table[i].IDE_flag == Msg->IDE_flag))
-
-            {
-                if (NULL != Instance->CCX_RX_table[i].Parser)
-                {
-                    Instance->GlobalStats.parser_calls_count++; /* Track parser calls (v1.3.0) */
-                    Instance->CCX_RX_table[i].Parser(Instance, Msg, i, Instance->CCX_RX_table[i].UserData);
-                }
-                Instance->CCX_RX_table[i].LastTick = Instance->RxReceivedTick[Instance->RxTail];
                 return CCX_MSG_REG;
             }
         }
     }
+
     return CCX_MSG_UNREG;
+#endif
 }
 
 static inline void CCX_Timeout_Check(CCX_instance_t *Instance)
@@ -327,6 +451,14 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
     /* Bus monitoring disabled by default (v1.3.0) */
     Instance->BusMonitor = NULL;
     Instance->OnMessageTransmitted = NULL;
+
+#if defined(CCX_RX_SEARCH_HASH)
+    /* Build hash table for RX messages */
+    if (Instance->CCX_RX_table != NULL && RxTableSize > 0)
+    {
+        CCX_RX_BuildHash(Instance);
+    }
+#endif
 
     return CCX_OK;
 }
@@ -629,4 +761,16 @@ void CCX_OnMessageTransmitted(CCX_instance_t *Instance, const CCX_message_t *msg
     {
         Instance->OnMessageTransmitted(Instance, msg);
     }
+}
+
+void CCX_RX_RebuildHash(CCX_instance_t *Instance)
+{
+#if defined(CCX_RX_SEARCH_HASH)
+    if (Instance != NULL && Instance->CCX_RX_table != NULL && Instance->RxTableSize > 0)
+    {
+        CCX_RX_BuildHash(Instance);
+    }
+#else
+    (void)Instance; /* Suppress unused parameter warning */
+#endif
 }
