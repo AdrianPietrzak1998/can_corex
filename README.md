@@ -1284,7 +1284,11 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v1.4.0 (2026-02-05)
+### Current Release: v1.4.1 (2026-02-05)
+- **Bug-fix**
+  - **Hash table size:** assert if RxTableSize >= CCX_RX_HASH_SIZE
+
+### Previous Release: v1.4.0 (2026-02-05)
 - **Compile-Time RX Lookup Strategies**: Configurable message search methods
   - **Linear Search** (default): O(n), no extra memory, best for < 15 messages
   - **Binary Search** (`-DCCX_RX_SEARCH_BINARY`): O(log n), requires sorted RX table, ideal for 15-50+ messages

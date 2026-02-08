@@ -116,6 +116,7 @@ static inline uint16_t CCX_Hash(uint32_t ID)
 static void CCX_RX_BuildHash(CCX_instance_t *Instance)
 {
     assert(Instance != NULL);
+    assert(Instance->RxTableSize < CCX_RX_HASH_SIZE);
 
     /* Clear hash table */
     for (uint16_t i = 0; i < CCX_RX_HASH_SIZE; i++)
