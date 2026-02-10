@@ -104,6 +104,36 @@ static inline uint8_t ISOTP_GetFCSTmin(const CCX_message_t *msg)
 }
 
 /**
+ * @brief Convert ISO-TP STmin value to milliseconds
+ * @param stmin_raw Raw STmin byte from Flow Control
+ * @return Delay in milliseconds
+ *
+ * According to ISO 15765-2:
+ * - 0x00-0x7F: 0-127 milliseconds
+ * - 0xF1-0xF9: 100-900 microseconds (rounded up to 1ms for ms tick resolution)
+ * - Other values: Reserved, use 0ms as default
+ */
+static inline CCX_TIME_VALUE_t ISOTP_ConvertSTminToMs(uint8_t stmin_raw)
+{
+    if (stmin_raw <= 0x7F)
+    {
+        /* 0x00-0x7F = 0-127 milliseconds */
+        return (CCX_TIME_VALUE_t)stmin_raw;
+    }
+    else if (stmin_raw >= 0xF1 && stmin_raw <= 0xF9)
+    {
+        /* 0xF1-0xF9 = 100-900 microseconds
+         * Round up to 1ms for millisecond tick resolution */
+        return 1;
+    }
+    else
+    {
+        /* Reserved values - use 0ms as default */
+        return 0;
+    }
+}
+
+/**
  * @brief Send CAN message with optional padding
  * @param CanInstance CAN CoreX instance
  * @param ID CAN identifier
@@ -159,6 +189,7 @@ CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, const CCX_ISOTP_T
     Instance->BlockCounter = 0;
     Instance->LastTick = 0;
     Instance->WaitFramesRemaining = ISOTP_MAX_WAIT_FRAMES;
+    Instance->STmin_ms = 0; /* Will be set from Flow Control */
 
     return CCX_ISOTP_OK;
 }
@@ -241,6 +272,7 @@ static inline void CCX_ISOTP_TX_HandleFlowControl(CCX_ISOTP_TX_t *Instance, cons
     case CCX_ISOTP_FC_CTS:
         /* Continue to send */
         Instance->BlockCounter = ISOTP_GetFCBlockSize(msg);
+        Instance->STmin_ms = ISOTP_ConvertSTminToMs(ISOTP_GetFCSTmin(msg));
         Instance->State = CCX_ISOTP_TX_STATE_SENDING_CF;
         Instance->LastTick = CCX_GET_TICK;
         Instance->WaitFramesRemaining = ISOTP_MAX_WAIT_FRAMES;
@@ -352,9 +384,21 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
         break;
 
     case CCX_ISOTP_TX_STATE_SENDING_CF:
-        /* Check N_Cs timeout and send next CF */
-        if (current_tick - Instance->LastTick >= Instance->Config.N_Cs)
+        /* Check if STmin delay has passed */
+        if (current_tick - Instance->LastTick >= Instance->STmin_ms)
         {
+            /* Check N_Cs timeout (protection against stuck transmission) */
+            if (current_tick - Instance->LastTick > Instance->Config.N_Cs)
+            {
+                /* Timeout between consecutive frames */
+                Instance->State = CCX_ISOTP_TX_STATE_IDLE;
+                if (Instance->Config.OnError != NULL)
+                {
+                    Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT, Instance->Config.UserData);
+                }
+                break;
+            }
+
             CCX_ISOTP_TX_SendConsecutiveFrame(Instance);
         }
         break;

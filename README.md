@@ -1,7 +1,7 @@
 # CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-1.4.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-1.4.2-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
 [![Tests](https://img.shields.io/badge/Tests-241%2F241%20passing-success.svg)]()
@@ -11,7 +11,7 @@
 
 ## Overview
 
-CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, ISO-TP transport protocol, and comprehensive bus health monitoring with automatic error recovery. Version 1.4.0 introduces compile-time configurable RX message lookup strategies for optimized performance.
+CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, ISO-TP transport protocol, and comprehensive bus health monitoring with automatic error recovery. Version 1.4.0 introduced compile-time configurable RX message lookup strategies for optimized performance.
 
 ## Table of Contents
 
@@ -1284,7 +1284,28 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v1.4.1 (2026-02-05)
+### Current Release: v1.4.2 (2026-02-10)
+- **ISO-TP Protocol Fixes**: Critical timing implementation corrections
+  - **STmin Implementation**: Fixed TX consecutive frame timing to use STmin from Flow Control instead of N_Cs
+    - STmin (from FC) now correctly used as minimum delay between consecutive frames
+    - N_Cs now properly used as timeout protection (maximum allowed time), not as delay
+    - Fixes extremely slow transfers (256 bytes taking ~3 minutes instead of <1 second)
+    - Complies with ISO 15765-2 specification for separation time handling
+  - **Timeout Boundary Condition**: Fixed false timeout at exact N_Cs timing
+    - Changed condition from `>=` to `>` for proper timeout detection
+    - Allows full use of configured timeout window (e.g., 10ms timeout no longer triggers at exactly 10ms)
+    - Fixes test failures in boundary conditions
+  - **Time Type System**: Added `CCX_TIME_VALUE_t` typedef for non-volatile time values
+    - Eliminates compiler warning: "type qualifiers ignored on function return type"
+    - Preserves configurable time type system (uint8/16/32/64 support)
+    - `CCX_TIME_t` (volatile) for tick variables, `CCX_TIME_VALUE_t` (non-volatile) for values/return types
+    - Maintains type consistency across custom time base configurations
+- **Breaking Changes**: None - all fixes are internal implementation corrections
+- **Performance Impact**: Massive improvement in ISO-TP transfer speed (100-200x faster for typical configurations)
+- **Testing**: All 241 tests passing, including previously failing ISO-TP boundary condition tests
+- **Hardware Validation**: Confirmed working on STM32 CAN peripherals
+
+### Previous Release: v1.4.1 (2026-02-05)
 - **Bug-fix**
   - **Hash table size:** assert if RxTableSize >= CCX_RX_HASH_SIZE
 

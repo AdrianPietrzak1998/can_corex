@@ -205,6 +205,7 @@ struct CCX_ISOTP_TX_t
     uint8_t BlockCounter;        /* Counter for BS */
     CCX_TIME_t LastTick;         /* Last activity timestamp */
     uint8_t WaitFramesRemaining; /* Number of WAIT FC frames we can tolerate */
+    CCX_TIME_VALUE_t STmin_ms;   /* STmin value from FC converted to milliseconds */
 };
 
 /**

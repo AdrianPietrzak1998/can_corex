@@ -103,26 +103,35 @@
 
 #define CCX_MAX_TIMEOUT UINT32_MAX
 typedef volatile uint32_t CCX_TIME_t;
+typedef uint32_t CCX_TIME_VALUE_t;  /* Non-volatile variant for values (not references) */
 
 #else
 
 typedef CCX_TIME_BASE_TYPE_CUSTOM CC_TIME_t;
 
 #if defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT8)
+typedef uint8_t CCX_TIME_VALUE_t;
 #define CCX_MAX_TIMEOUT UINT8_MAX
 #elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT16)
+typedef uint16_t CCX_TIME_VALUE_t;
 #define CCX_MAX_TIMEOUT UINT16_MAX
 #elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT32)
+typedef uint32_t CCX_TIME_VALUE_t;
 #define CCX_MAX_TIMEOUT UINT32_MAX
 #elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT64)
+typedef uint64_t CCX_TIME_VALUE_t;
 #define CCX_MAX_TIMEOUT UINT64_MAX
 #elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_INT8)
+typedef int8_t CCX_TIME_VALUE_t;
 #define CCX_MAX_TIMEOUT INT8_MAX
 #elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_INT16)
+typedef int16_t CCX_TIME_VALUE_t;
 #define CCX_MAX_TIMEOUT INT16_MAX
 #elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_INT32)
+typedef int32_t CCX_TIME_VALUE_t;
 #define CCX_MAX_TIMEOUT INT32_MAX
 #elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_INT64)
+typedef int64_t CCX_TIME_VALUE_t;
 #define CCX_MAX_TIMEOUT INT64_MAX
 #else
 #error "CCX_MAX_TIMEOUT: Unknown CCX_TIME_BASE_TYPE_CUSTOM or missing _IS_* define"
