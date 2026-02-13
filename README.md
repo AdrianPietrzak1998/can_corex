@@ -115,7 +115,7 @@ Choose hash table size based on your RX table size for optimal performance:
 | 31-60       | 128                  | ~47%        | 256 bytes   |
 | 61-120      | 256                  | ~47%        | 512 bytes   |
 
-**Rule of thumb**: `HASH_SIZE â‰ˆ RxTableSize Ã— 2` (rounded to next power of 2)
+**Rule of thumb**: `HASH_SIZE ≈ RxTableSize × 2` (rounded to next power of 2)
 
 ### Rebuilding Hash Table
 
