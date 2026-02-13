@@ -25,7 +25,6 @@ extern CCX_TIME_t *CCX_tick;
 #define ISOTP_SF_MAX_DATA 7 /* Single Frame max data bytes */
 #define ISOTP_FF_DATA_BYTES 6 /* First Frame data bytes (after 2-byte length) */
 #define ISOTP_CF_DATA_BYTES 7 /* Consecutive Frame data bytes */
-#define ISOTP_FC_SIZE 3 /* Flow Control frame size (PCI, FS, BS, STmin) */
 
 #define ISOTP_MAX_WAIT_FRAMES 10 /* Maximum number of WAIT FC frames to tolerate */
 
@@ -80,7 +79,7 @@ static inline uint8_t ISOTP_GetCFSequenceNumber(const CCX_message_t *msg)
  */
 static inline uint8_t ISOTP_GetFCFlowStatus(const CCX_message_t *msg)
 {
-    return msg->Data[1];
+    return msg->Data[0] & 0x0F;
 }
 
 /**
@@ -90,17 +89,17 @@ static inline uint8_t ISOTP_GetFCFlowStatus(const CCX_message_t *msg)
  */
 static inline uint8_t ISOTP_GetFCBlockSize(const CCX_message_t *msg)
 {
-    return msg->Data[2];
+    return msg->Data[1];
 }
 
 /**
  * @brief Extract Separation Time minimum from Flow Control frame
  * @param msg CAN message containing Flow Control
- * @return STmin value (0-127ms or 0xF1-0xF9 for 100-900µs)
+ * @return STmin value (0-127ms or 0xF1-0xF9 for 100-900Âµs)
  */
 static inline uint8_t ISOTP_GetFCSTmin(const CCX_message_t *msg)
 {
-    return msg->Data[3];
+    return msg->Data[2];
 }
 
 /**
@@ -446,14 +445,13 @@ static inline void CCX_ISOTP_RX_SendFlowControl(CCX_ISOTP_RX_t *Instance, CCX_IS
     assert(Instance != NULL);
 
     uint8_t frame[8];
-    frame[0] = CCX_ISOTP_PCI_FC;
-    frame[1] = FlowStatus;
-    frame[2] = Instance->Config.BS;
-    frame[3] = Instance->Config.STmin;
+    frame[0] = (uint8_t)(CCX_ISOTP_PCI_FC | (FlowStatus & 0x0F));
+    frame[1] = Instance->Config.BS;
+    frame[2] = Instance->Config.STmin;
 
-    /* Use configured padding for FC */
+    /* ISO 15765-2: FC frame is 3 bytes [PCI+FS, BS, STmin] */
     ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
-                         ISOTP_FC_SIZE + 1, &Instance->Config.Padding);
+                         3, &Instance->Config.Padding);
 }
 
 static inline void CCX_ISOTP_RX_HandleSingleFrame(CCX_ISOTP_RX_t *Instance, const CCX_message_t *msg)

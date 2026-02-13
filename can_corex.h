@@ -14,8 +14,6 @@
 #include <limits.h>
 #include <stdint.h>
 
-#define DCCX_RX_SEARCH_HASH
-
 /**
  * @def CCX_TICK_FROM_FUNC
  * @brief Enables system tick retrieval via a function call.
@@ -107,7 +105,7 @@ typedef uint32_t CCX_TIME_VALUE_t;  /* Non-volatile variant for values (not refe
 
 #else
 
-typedef CCX_TIME_BASE_TYPE_CUSTOM CC_TIME_t;
+typedef CCX_TIME_BASE_TYPE_CUSTOM CCX_TIME_t;
 
 #if defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT8)
 typedef uint8_t CCX_TIME_VALUE_t;

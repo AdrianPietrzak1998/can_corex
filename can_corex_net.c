@@ -12,6 +12,15 @@
 #include "string.h"
 #include <assert.h>
 
+/* External tick getter from can_corex.c */
+#if CCX_TICK_FROM_FUNC
+extern CCX_TIME_t (*CCX_get_tick)(void);
+#define CCX_GET_TICK ((CCX_get_tick != NULL) ? CCX_get_tick() : ((CCX_TIME_t)0))
+#else
+extern CCX_TIME_t *CCX_tick;
+#define CCX_GET_TICK (*(CCX_tick))
+#endif
+
 /**
  * @brief Global list of all CAN networks
  *
@@ -94,6 +103,7 @@ static void CCX_net_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *ms
     Instance->RxHead = next_head;
 
     memcpy(&Instance->RxBuf[Instance->RxHead], msg, sizeof(CCX_message_t));
+    Instance->RxReceivedTick[Instance->RxHead] = CCX_GET_TICK;
 }
 
 CCX_net_status_t CCX_net_init(CCX_net_t *net)

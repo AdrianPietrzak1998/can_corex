@@ -1,10 +1,10 @@
 # CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-1.4.2-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-1.4.3-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-241%2F241%20passing-success.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-253%2F253%20passing-success.svg)]()
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
 
@@ -115,7 +115,7 @@ Choose hash table size based on your RX table size for optimal performance:
 | 31-60       | 128                  | ~47%        | 256 bytes   |
 | 61-120      | 256                  | ~47%        | 512 bytes   |
 
-**Rule of thumb**: `HASH_SIZE ≈ RxTableSize × 2` (rounded to next power of 2)
+**Rule of thumb**: `HASH_SIZE â‰ˆ RxTableSize Ã— 2` (rounded to next power of 2)
 
 ### Rebuilding Hash Table
 
@@ -135,10 +135,10 @@ Example lookup times for different table sizes (measured on ARM Cortex-M4 @ 168M
 
 | RX Messages | Linear Search | Binary Search | Hash Table |
 |-------------|---------------|---------------|------------|
-| 10          | ~0.5 µs       | ~0.3 µs       | ~0.2 µs    |
-| 30          | ~1.5 µs       | ~0.4 µs       | ~0.2 µs    |
-| 50          | ~2.5 µs       | ~0.5 µs       | ~0.2 µs    |
-| 100         | ~5.0 µs       | ~0.6 µs       | ~0.2 µs    |
+| 10          | ~0.5 Âµs       | ~0.3 Âµs       | ~0.2 Âµs    |
+| 30          | ~1.5 Âµs       | ~0.4 Âµs       | ~0.2 Âµs    |
+| 50          | ~2.5 Âµs       | ~0.5 Âµs       | ~0.2 Âµs    |
+| 100         | ~5.0 Âµs       | ~0.6 Âµs       | ~0.2 Âµs    |
 
 ### Choosing the Right Strategy
 
@@ -254,7 +254,7 @@ rx_table[5].Parser = new_parser;
 CCX_RX_RebuildHash(&can_instance);
 ```
 
-**Performance**: O(n) where n = RxTableSize. Typical rebuild time: ~10-50 µs depending on table size.
+**Performance**: O(n) where n = RxTableSize. Typical rebuild time: ~10-50 Âµs depending on table size.
 
 ---
 
@@ -781,18 +781,26 @@ void tx_complete_callback(CCX_ISOTP_TX_t *Instance, void *UserData) {
 }
 ```
 
-### Flow Control Padding
+### Flow Control Frame Layout (ISO 15765-2)
 
-Flow Control frames respect the `Padding` configuration from RX:
+Flow Control frames follow the ISO 15765-2 standard layout:
+
+```
+Data[0] = 0x3N    (PCI=0x30 | Flow Status in lower nibble: 0=CTS, 1=WAIT, 2=OVFLW)
+Data[1] = BS      (Block Size: 0=unlimited, 1-255=CF count before next FC)
+Data[2] = STmin   (Separation Time minimum: 0-127ms or 0xF1-0xF9 for 100-900µs)
+```
+
+FC frames respect the `Padding` configuration from RX:
 
 ```c
 // With padding - FC will have DLC=8
 .Padding = {.Enable = 1, .PaddingByte = 0xAA}
-// Sends: [30 00 00 00 AA AA AA AA]
+// Example with BS=0, STmin=10: [30 00 0A AA AA AA AA AA]
 
-// Without padding - FC will have DLC=4
+// Without padding - FC will have DLC=3
 .Padding = {.Enable = 0}
-// Sends: [30 00 00 00]
+// Example with BS=0, STmin=10: [30 00 0A]
 ```
 
 Both variants work correctly thanks to `CCX_DLC_ANY` wildcard matching in the RX table macros.
@@ -1284,7 +1292,25 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v1.4.2 (2026-02-10)
+### Current Release: v1.4.3 (2026-02-13)
+- **ISO-TP Flow Control Frame Fix (CRITICAL)**: Fixed FC frame layout to comply with ISO 15765-2
+  - Flow Status now encoded in lower nibble of PCI byte (`Data[0] = 0x3N`) instead of separate `Data[1]`
+  - Block Size moved from `Data[2]` to `Data[1]`, STmin moved from `Data[3]` to `Data[2]`
+  - FC DLC without padding corrected from 4 to 3 bytes
+  - **Previous versions were incompatible with all external ISO-TP implementations** (CANoe, PCAN, any standards-compliant ECU)
+  - Internal loopback tests passed before because both TX and RX had the same bug
+- **Custom Time Type Fix**: Fixed typedef `CC_TIME_t` → `CCX_TIME_t` in `can_corex.h`
+  - Any user defining `CCX_TIME_BASE_TYPE_CUSTOM` would get a compilation error in v1.4.0-v1.4.2
+- **Header Cleanup**: Removed leftover `#define DCCX_RX_SEARCH_HASH` from `can_corex.h`
+- **Network RX Replication Fix**: `CCX_net_RX_PushMsg` now sets `RxReceivedTick`
+  - Timeout detection for messages received via network replication (`CCX_NET_TX_RX_REPLICATION`) was broken — `LastTick` was never updated because `RxReceivedTick` stayed at 0
+- **New Test**: ISO 15765-2 FC frame layout validation with non-zero BS and STmin values
+  - Verifies byte-level FC format, TX-side parsing of BS/STmin, and end-to-end transfer with BS=5
+- **Breaking Changes**: ISO-TP FC wire format changed — **not backward compatible** with v1.2.0-v1.4.2 ISO-TP peers
+  - Now compatible with all standards-compliant ISO-TP implementations
+- **Testing**: 253/253 tests passing across all three search modes (linear, binary, hash)
+
+### Previous Release: v1.4.2 (2026-02-10)
 - **ISO-TP Protocol Fixes**: Critical timing implementation corrections
   - **STmin Implementation**: Fixed TX consecutive frame timing to use STmin from Flow Control instead of N_Cs
     - STmin (from FC) now correctly used as minimum delay between consecutive frames
