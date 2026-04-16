@@ -1,7 +1,7 @@
 # CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-1.4.3-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-1.4.4-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
 [![Tests](https://img.shields.io/badge/Tests-253%2F253%20passing-success.svg)]()
@@ -1292,7 +1292,28 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v1.4.3 (2026-02-13)
+### Current Release: v1.4.4 (2026-04-01)
+- **Bug Fixes**:
+  - **ISO-TP N_Cs timeout logic (CRITICAL)**: Fixed N_Cs timeout check incorrectly nested inside STmin condition
+    - When `STmin > N_Cs`, the timeout never fired — CF was sent before N_Cs could trigger
+    - When `N_Cs = 0`, any elapsed tick immediately triggered a false timeout instead of sending CF
+    - N_Cs is now checked independently of STmin, with `N_Cs == 0` treated as disabled
+  - **ISO-TP FC.WAIT LastTick ordering (MODERATE)**: Fixed `LastTick` being updated after `OnError` callback when FC.WAIT frames are exhausted
+    - If a new transmission was started inside the `OnError` callback, its `LastTick` was immediately overwritten
+    - `LastTick` is now updated before invoking the callback
+  - **Network cyclic list (CRITICAL)**: Fixed `CCX_net_init()` not checking the last node for duplicates
+    - Re-adding the last node in the linked list set `node->next = node`, creating a cycle
+    - Any subsequent `CCX_net_push()` call would then hang in an infinite loop
+    - Added duplicate check for the final node after the traversal loop
+- **Test Coverage**: Added 4 previously missing tests — 100% of public API now explicitly tested
+  - `CCX_BusMonitor_GetState()` — all states (ACTIVE, WARNING, PASSIVE, OFF) and NULL safety
+  - `CCX_BusMonitor_ResetStats()` — counter zeroing, state preservation, NULL safety
+  - `CCX_RX_RebuildHash()` — dynamic table modification and hash rebuild in hash mode; no-op in other modes
+  - ISO-TP 400-byte payload — multi-frame segmentation and data integrity for large transfers
+- **Breaking Changes**: None — all changes are internal fixes, fully backward compatible
+- **Testing**: 275/275 tests passing (linear, binary); 279/279 tests passing (hash)
+
+### Previous Release: v1.4.3 (2026-02-13)
 - **ISO-TP Flow Control Frame Fix (CRITICAL)**: Fixed FC frame layout to comply with ISO 15765-2
   - Flow Status now encoded in lower nibble of PCI byte (`Data[0] = 0x3N`) instead of separate `Data[1]`
   - Block Size moved from `Data[2]` to `Data[1]`, STmin moved from `Data[3]` to `Data[2]`

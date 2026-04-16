@@ -280,6 +280,9 @@ static inline void CCX_ISOTP_TX_HandleFlowControl(CCX_ISOTP_TX_t *Instance, cons
     case CCX_ISOTP_FC_WAIT:
         /* Wait for next FC */
         Instance->WaitFramesRemaining--;
+        /* Update LastTick before the error callback so a new transmission
+         * started inside OnError is not overwritten by this assignment. */
+        Instance->LastTick = CCX_GET_TICK;
         if (Instance->WaitFramesRemaining == 0)
         {
             /* Too many WAIT frames */
@@ -289,7 +292,6 @@ static inline void CCX_ISOTP_TX_HandleFlowControl(CCX_ISOTP_TX_t *Instance, cons
                 Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT, Instance->Config.UserData);
             }
         }
-        Instance->LastTick = CCX_GET_TICK;
         break;
 
     case CCX_ISOTP_FC_OVFLW:
@@ -383,21 +385,22 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
         break;
 
     case CCX_ISOTP_TX_STATE_SENDING_CF:
-        /* Check if STmin delay has passed */
+        /* N_Cs timeout: max time between consecutive frames, checked independently
+         * of STmin. N_Cs == 0 means disabled (no timeout). */
+        if (Instance->Config.N_Cs > 0 && current_tick - Instance->LastTick > Instance->Config.N_Cs)
+        {
+            /* Timeout between consecutive frames */
+            Instance->State = CCX_ISOTP_TX_STATE_IDLE;
+            if (Instance->Config.OnError != NULL)
+            {
+                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT, Instance->Config.UserData);
+            }
+            break;
+        }
+
+        /* Check if STmin delay has passed before sending next CF */
         if (current_tick - Instance->LastTick >= Instance->STmin_ms)
         {
-            /* Check N_Cs timeout (protection against stuck transmission) */
-            if (current_tick - Instance->LastTick > Instance->Config.N_Cs)
-            {
-                /* Timeout between consecutive frames */
-                Instance->State = CCX_ISOTP_TX_STATE_IDLE;
-                if (Instance->Config.OnError != NULL)
-                {
-                    Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT, Instance->Config.UserData);
-                }
-                break;
-            }
-
             CCX_ISOTP_TX_SendConsecutiveFrame(Instance);
         }
         break;

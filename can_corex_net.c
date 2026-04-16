@@ -134,6 +134,11 @@ CCX_net_status_t CCX_net_init(CCX_net_t *net)
             }
             last = last->next;
         }
+        /* Check the last node too — the loop exits before comparing it */
+        if (last == net)
+        {
+            return CCX_NET_ALREDY_EXISTING;
+        }
         last->next = net;
         net->next = NULL;
 
