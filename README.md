@@ -135,10 +135,10 @@ Example lookup times for different table sizes (measured on ARM Cortex-M4 @ 168M
 
 | RX Messages | Linear Search | Binary Search | Hash Table |
 |-------------|---------------|---------------|------------|
-| 10          | ~0.5 Âµs       | ~0.3 Âµs       | ~0.2 Âµs    |
-| 30          | ~1.5 Âµs       | ~0.4 Âµs       | ~0.2 Âµs    |
-| 50          | ~2.5 Âµs       | ~0.5 Âµs       | ~0.2 Âµs    |
-| 100         | ~5.0 Âµs       | ~0.6 Âµs       | ~0.2 Âµs    |
+| 10          | ~0.5 µs       | ~0.3 µs       | ~0.2 µs    |
+| 30          | ~1.5 µs       | ~0.4 µs       | ~0.2 µs    |
+| 50          | ~2.5 µs       | ~0.5 µs       | ~0.2 µs    |
+| 100         | ~5.0 µs       | ~0.6 µs       | ~0.2 µs    |
 
 ### Choosing the Right Strategy
 
