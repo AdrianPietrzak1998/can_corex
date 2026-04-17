@@ -144,7 +144,7 @@ static inline CCX_TIME_VALUE_t ISOTP_ConvertSTminToMs(uint8_t stmin_raw)
 static inline void ISOTP_SendCANMessage(CCX_instance_t *CanInstance, uint32_t ID, uint8_t IDE_flag, const uint8_t *Data,
                                         uint8_t DLC, const CCX_ISOTP_Padding_t *Padding)
 {
-    CCX_message_t msg;
+    CCX_message_t msg = {0};
     msg.ID = ID;
     msg.IDE_flag = IDE_flag;
     msg.DLC = DLC;
@@ -199,6 +199,14 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
     {
         return CCX_ISOTP_ERROR_NULL_PTR;
     }
+
+#if CCX_ENABLE_CANFD
+    if (Instance->Config.CanInstance != NULL &&
+        Instance->Config.CanInstance->FrameFormat == CCX_FRAME_FORMAT_FD)
+    {
+        return CCX_ISOTP_ERROR_FD_NOT_SUPPORTED;
+    }
+#endif
 
     if (Length == 0 || Length > CCX_ISOTP_MAX_DATA_SIZE)
     {

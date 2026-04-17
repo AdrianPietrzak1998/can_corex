@@ -1,23 +1,29 @@
 # CAN CoreX Implementation Guide
 
-**Version:** 1.3.0  
+**Version:** 2.0.0  
 **Author:** Adrian Pietrzak  
-**Date:** January 2026
+**Date:** April 2026
 
 ---
 
 ## Table of Contents
 
 1. [Recommended File Structure](#recommended-file-structure)
-2. [Platform: STM32 HAL (CAN 2.0)](#platform-stm32-hal-can-20)
+2. [Platform: STM32 HAL — bxCAN (CAN 2.0)](#platform-stm32-hal--bxcan-can-20)
    - [1.1 Basic TX/RX Implementation](#11-basic-txrx-implementation)
    - [1.2 Bus Monitoring & Statistics](#12-bus-monitoring--statistics)
-3. [Platform: STM32 HAL (FDCAN as CAN 2.0)](#platform-stm32-hal-fdcan-as-can-20)
+3. [Platform: STM32 HAL — FDCAN (CAN 2.0 mode)](#platform-stm32-hal--fdcan-can-20-mode)
    - [2.1 Basic TX/RX Implementation](#21-basic-txrx-implementation-1)
    - [2.2 Bus Monitoring & Statistics](#22-bus-monitoring--statistics-1)
-4. [Platform: TI Connectivity Manager (CAN 2.0)](#platform-ti-connectivity-manager-can-20)
+4. [Platform: STM32 HAL — FDCAN (CAN FD mode, CCX\_ENABLE\_CANFD=1)](#platform-stm32-hal--fdcan-can-fd-mode-ccx_enable_canfd1)
    - [3.1 Basic TX/RX Implementation](#31-basic-txrx-implementation)
    - [3.2 Bus Monitoring & Statistics](#32-bus-monitoring--statistics)
+5. [Platform: TI Connectivity Manager — CAN 2.0](#platform-ti-connectivity-manager--can-20)
+   - [4.1 Basic TX/RX Implementation](#41-basic-txrx-implementation)
+   - [4.2 Bus Monitoring & Statistics](#42-bus-monitoring--statistics)
+6. [Platform: TI Connectivity Manager — MCAN (CAN FD mode, CCX\_ENABLE\_CANFD=1)](#platform-ti-connectivity-manager--mcan-can-fd-mode-ccx_enable_canfd1)
+   - [5.1 Basic TX/RX Implementation](#51-basic-txrx-implementation)
+   - [5.2 Bus Monitoring & Statistics](#52-bus-monitoring--statistics)
 
 ---
 
@@ -83,7 +89,10 @@ project/
 
 ---
 
-## Platform: STM32 HAL (CAN 2.0)
+## Platform: STM32 HAL — bxCAN (CAN 2.0)
+
+Applies to STM32 MCUs with the **bxCAN** peripheral (F1, F2, F4, L1, L4… series).
+For MCUs with the FDCAN peripheral (G4, H7, U5…) see sections 3 and 4.
 
 ### Prerequisites
 
@@ -1298,6 +1307,38 @@ int main(void)
 }
 ```
 
+#### ⚠️ Note: bxCAN Automatic Bus-Off Management (ABOM)
+
+STM32 bxCAN has an **ABOM** (Automatic Bus-Off Management) bit in `CAN_MCR`, configurable in CubeMX as `CAN_InitTypeDef.AutoBusOff`. When set to `ENABLE`, the peripheral hardware automatically exits the bus-off state after the standard 128 × 11 recessive bit recovery sequence — **no software intervention is needed**.
+
+If ABOM is enabled in your project:
+- Set `auto_recovery_enabled = 0` in `CCX_BusMonitor_Init` — let the hardware handle recovery
+- Pass a no-op function for `RequestRecovery` (it will never be called with `auto_recovery_enabled = 0`)
+- The bus monitor still provides state tracking, error counters, and callbacks — use it for monitoring only
+
+```c
+/* No-op recovery — hardware handles bus-off automatically via ABOM */
+static void CAN_request_recovery_noop(const CCX_instance_t *Instance)
+{
+    (void)Instance;
+    /* Do nothing — ABOM takes care of recovery */
+}
+
+/* Initialize with auto_recovery_enabled = 0 when ABOM is active */
+CCX_BusMonitor_Init(
+    &CAN1_instance, &CAN1_monitor,
+    CAN1_get_bus_state, CAN1_get_error_counters,
+    CAN_request_recovery_noop,
+    10, 60000,
+    0,  /* auto_recovery_enabled = 0 — hardware recovers automatically */
+    0
+);
+```
+
+When ABOM is **disabled** (default), use `auto_recovery_enabled = 1` with the `HAL_CAN_Stop` / `HAL_CAN_Start` recovery function shown above.
+
+---
+
 #### Step 6: Manual Recovery Trigger
 
 You can also trigger recovery manually:
@@ -1326,17 +1367,19 @@ void CAN_App_TriggerManualRecovery(uint8_t can_number)
 
 ---
 
-## Platform: STM32 HAL (FDCAN as CAN 2.0)
+## Platform: STM32 HAL — FDCAN (CAN 2.0 mode)
+
+Applies to STM32 MCUs with the **FDCAN** peripheral (G4, H7, U5, G0B1…) running in
+**classic CAN 2.0 mode** — no FD payload, library compiled without `CCX_ENABLE_CANFD`.
+For FD payload support see section 4.
 
 ### Prerequisites
 
 - STM32 with FDCAN peripheral (e.g., STM32G4, STM32H7, STM32U5)
-- FDCAN configured in **Classic CAN mode** (not FD mode)
+- FDCAN configured in **Classic CAN mode** in STM32CubeMX (FD mode disabled)
 - **Required interrupts enabled in NVIC:**
   - `FDCANx_IT0_IRQn` or `FDCANx_IT1_IRQn` (RX FIFO interrupts)
 - System tick configured
-
-**Note:** FDCAN peripheral supports both Classic CAN 2.0 and CAN FD modes. This implementation uses FDCAN configured as Classic CAN 2.0.
 
 ---
 
@@ -1928,22 +1971,393 @@ void CAN_App_Init(void)
 
 ---
 
-## Platform: TI Connectivity Manager (CAN 2.0)
+## Platform: STM32 HAL — FDCAN (CAN FD mode, CCX\_ENABLE\_CANFD=1)
+
+Applies to STM32 MCUs with the FDCAN peripheral (G4, H7, U5…) with **CAN FD payload
+support enabled** — compile with `-DCCX_ENABLE_CANFD=1`. Uses `CCX_Init_Ex()` to select
+frame format per instance and translates FDF/BRS/ESI between the library and the HAL.
 
 ### Prerequisites
 
-- TI C2000 device with Connectivity Manager subsystem
-- Driverlib CAN driver
+- STM32G4, STM32H7, STM32U5 or other MCU with FDCAN
+- **CubeMX:** FDCAN mode = **FD** (not Classic). Under *Advanced Parameters* set
+  *Payload size* to **64 bytes** in the message RAM allocation.
+- Separate nominal and data phase bit-timing configured (e.g. 500 kbit/s nominal,
+  2 Mbit/s data)
+- **Required interrupts enabled in NVIC:** `FDCANx_IT0_IRQn`
+- Library compiled with `-DCCX_ENABLE_CANFD=1`
+
+---
+
+### 3.1 Basic TX/RX Implementation
+
+#### Key differences from FDCAN classic mode (section 2):
+
+| | Classic mode | FD mode |
+|---|---|---|
+| Init function | `CCX_Init` | `CCX_Init_Ex` with `CCX_FRAME_FORMAT_FD` |
+| `CCX_message_t.Data` | `uint8_t[8]` | `uint8_t[64]` |
+| RX data buffer | `uint8_t RxData[8]` | `uint8_t RxData[64]` |
+| `TxHeader.FDFormat` | `FDCAN_CLASSIC_CAN` | `msg->FDF ? FDCAN_FD_CAN : FDCAN_CLASSIC_CAN` |
+| `TxHeader.BitRateSwitch` | `FDCAN_BRS_OFF` | `msg->BRS ? FDCAN_BRS_ON : FDCAN_BRS_OFF` |
+| RX table FD wildcards | `CCX_DLC_ANY` (=15) | `CCX_DLC_ANY` (=16) + `.FDF=1` after Init |
+
+#### DLC encoding
+
+Both the library and the FDCAN HAL use the same raw DLC field (0–15). The conversion
+formula is identical for classic and FD frames:
+
+```c
+TxHeader.DataLength = (uint32_t)msg->DLC << 16;
+// DLC 0..8  → FDCAN_DLC_BYTES_0..FDCAN_DLC_BYTES_8
+// DLC 9     → FDCAN_DLC_BYTES_12 (12 bytes)
+// DLC 15    → FDCAN_DLC_BYTES_64 (64 bytes)
+
+// RX decode:
+msg.DLC = (RxHeader.DataLength >> 16) & 0x0FU;
+```
+
+Use `CCX_FD_DLC_TO_LEN[msg->DLC]` to get the actual byte count when copying payload data.
+
+---
+
+#### Step 1: Frame type definitions
+
+Add FD-capable frame types to `can_app_frame_types.h`. Classic 8-byte unions still work
+unchanged; add new 64-byte types as needed:
+
+```c
+/* 64-byte FD frame example */
+typedef union {
+    uint8_t frame[64];
+    struct {
+        uint32_t timestamp;
+        uint16_t channel;
+        uint16_t flags;
+        uint8_t  samples[56];
+    } __attribute__((packed));
+} CAN_FD_SensorBurst_t;
+```
+
+#### Step 2: TX / RX table
+
+TX table entries use raw DLC values (0–15). Use `CCX_FD_DLC_t` named constants:
+
+```c
+#include "can_corex.h"
+
+/* Frame instances */
+CAN_FD_SensorBurst_t CAN_SensorBurst;
+
+CCX_TX_table_t CAN1_tx_table[] = {
+    /* Classic frame — DLC 8, FDF/BRS default to 0 (classic) */
+    {.ID = 0x200, .Data = CAN_MotorStatus.frame, .DLC = 8,
+     .IDE_flag = 0, .SendFreq = 100},
+    /* FD frame — 64-byte payload, BRS=1 */
+    {.ID = 0x210, .Data = CAN_SensorBurst.frame, .DLC = CCX_FD_DLC_64B,
+     .IDE_flag = 0, .FDF = 1, .BRS = 1, .SendFreq = 50},
+};
+
+/* RX table — FDF field must be set AFTER CCX_Init_Ex clears it */
+CCX_RX_table_t CAN1_rx_table[] = {
+    /* Classic exact-DLC entry — works unchanged */
+    {.ID = 0x100, .DLC = 8,           .IDE_flag = 0, .Parser = classic_parser,  .TimeOut = 1000},
+    /* FD exact-DLC: 64 bytes — FDF not checked for exact-DLC match */
+    {.ID = 0x300, .DLC = CCX_FD_DLC_64B, .IDE_flag = 0, .Parser = fd64_parser, .TimeOut = 0},
+    /* FD wildcard — CCX_DLC_ANY=16, FDF=1 set after Init */
+    {.ID = 0x400, .DLC = CCX_DLC_ANY, .IDE_flag = 0, .Parser = fd_any_parser,   .TimeOut = 0},
+};
+```
+
+#### Step 3: Hardware interface functions
+
+**File: `can_app.c`**
+
+```c
+#include "can_app.h"
+#include "can_corex.h"
+#include "main.h"   /* FDCAN handles from CubeMX */
+
+CCX_instance_t FDCAN1_fd_instance;
+CCX_instance_t FDCAN2_fd_instance;
+
+volatile uint32_t system_tick_ms = 0;
+
+extern FDCAN_HandleTypeDef hfdcan1;
+extern FDCAN_HandleTypeDef hfdcan2;
+
+/* -------------------------------------------------------------------------
+ * TX — translate CCX_message_t to FDCAN HAL header
+ * ------------------------------------------------------------------------- */
+static void FDCAN1_send_fd(const CCX_instance_t *Instance, const CCX_message_t *msg)
+{
+    (void)Instance;
+
+    FDCAN_TxHeaderTypeDef TxHeader;
+
+    TxHeader.Identifier    = msg->ID;
+    TxHeader.IdType        = msg->IDE_flag ? FDCAN_EXTENDED_ID : FDCAN_STANDARD_ID;
+    TxHeader.TxFrameType   = FDCAN_DATA_FRAME;
+    /* (uint32_t)DLC << 16 maps 0-15 to FDCAN_DLC_BYTES_0..FDCAN_DLC_BYTES_64 */
+    TxHeader.DataLength    = (uint32_t)msg->DLC << 16;
+    TxHeader.FDFormat      = msg->FDF ? FDCAN_FD_CAN    : FDCAN_CLASSIC_CAN;
+    TxHeader.BitRateSwitch = msg->BRS ? FDCAN_BRS_ON    : FDCAN_BRS_OFF;
+    TxHeader.ErrorStateIndicator  = FDCAN_ESI_ACTIVE;
+    TxHeader.TxEventFifoControl   = FDCAN_NO_TX_EVENTS;
+    TxHeader.MessageMarker        = 0;
+
+    /* Data array is uint8_t[64] — HAL copies only the bytes indicated by DataLength */
+    HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, (uint8_t *)msg->Data);
+}
+
+static void FDCAN2_send_fd(const CCX_instance_t *Instance, const CCX_message_t *msg)
+{
+    (void)Instance;
+
+    FDCAN_TxHeaderTypeDef TxHeader;
+    TxHeader.Identifier           = msg->ID;
+    TxHeader.IdType               = msg->IDE_flag ? FDCAN_EXTENDED_ID : FDCAN_STANDARD_ID;
+    TxHeader.TxFrameType          = FDCAN_DATA_FRAME;
+    TxHeader.DataLength           = (uint32_t)msg->DLC << 16;
+    TxHeader.FDFormat             = msg->FDF ? FDCAN_FD_CAN    : FDCAN_CLASSIC_CAN;
+    TxHeader.BitRateSwitch        = msg->BRS ? FDCAN_BRS_ON    : FDCAN_BRS_OFF;
+    TxHeader.ErrorStateIndicator  = FDCAN_ESI_ACTIVE;
+    TxHeader.TxEventFifoControl   = FDCAN_NO_TX_EVENTS;
+    TxHeader.MessageMarker        = 0;
+
+    HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, (uint8_t *)msg->Data);
+}
+
+/* Bus free check — same as classic FDCAN */
+static CCX_BusIsFree_t FDCAN1_bus_check_fd(const CCX_instance_t *Instance)
+{
+    (void)Instance;
+    return HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) > 0 ? CCX_BUS_FREE : CCX_BUS_BUSY;
+}
+
+static CCX_BusIsFree_t FDCAN2_bus_check_fd(const CCX_instance_t *Instance)
+{
+    (void)Instance;
+    return HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan2) > 0 ? CCX_BUS_FREE : CCX_BUS_BUSY;
+}
+
+/* -------------------------------------------------------------------------
+ * Initialization
+ * ------------------------------------------------------------------------- */
+void CAN_App_Init(void)
+{
+    CCX_tick_variable_register(&system_tick_ms);
+
+    /* CCX_Init_Ex selects CAN FD frame format for this instance */
+    CCX_Init_Ex(&FDCAN1_fd_instance,
+                CAN1_rx_table, CAN1_tx_table,
+                CAN1_RX_END,   CAN1_TX_END,
+                FDCAN1_send_fd, FDCAN1_bus_check_fd,
+                CAN1_rx_unreg_parser,
+                CCX_FRAME_FORMAT_FD,
+                1);    /* BRS_Default = 1: periodic TX FD frames use bit-rate switch */
+
+    /* Set FD-specific RX fields AFTER Init (CCX_Init_Ex zeroes FDF) */
+    CAN1_rx_table[2].FDF = 1;  /* wildcard CCX_DLC_ANY matches FD frames only */
+
+    CCX_Init_Ex(&FDCAN2_fd_instance,
+                CAN2_rx_table, CAN2_tx_table,
+                CAN2_RX_END,   CAN2_TX_END,
+                FDCAN2_send_fd, FDCAN2_bus_check_fd,
+                CAN2_rx_unreg_parser,
+                CCX_FRAME_FORMAT_FD,
+                1);
+
+    /* Configure FDCAN1 — accept all frames (std + ext) to FIFO0 */
+    FDCAN_FilterTypeDef filter = {
+        .IdType       = FDCAN_STANDARD_ID,
+        .FilterIndex  = 0,
+        .FilterType   = FDCAN_FILTER_MASK,
+        .FilterConfig = FDCAN_FILTER_TO_RXFIFO0,
+        .FilterID1    = 0x000,
+        .FilterID2    = 0x000,  /* mask 0 = accept all */
+    };
+    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
+    filter.IdType    = FDCAN_EXTENDED_ID;
+    filter.FilterID1 = 0x00000000;
+    filter.FilterID2 = 0x00000000;
+    HAL_FDCAN_ConfigFilter(&hfdcan1, &filter);
+
+    /* Same for FDCAN2 → FIFO1 */
+    filter.IdType       = FDCAN_STANDARD_ID;
+    filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO1;
+    HAL_FDCAN_ConfigFilter(&hfdcan2, &filter);
+    filter.IdType = FDCAN_EXTENDED_ID;
+    HAL_FDCAN_ConfigFilter(&hfdcan2, &filter);
+
+    HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
+    HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO1_NEW_MESSAGE, 0);
+
+    HAL_FDCAN_Start(&hfdcan1);
+    HAL_FDCAN_Start(&hfdcan2);
+}
+
+void CAN_App_Process(void)
+{
+    CCX_Poll(&FDCAN1_fd_instance);
+    CCX_Poll(&FDCAN2_fd_instance);
+}
+
+void CAN_App_SysTick(void)
+{
+    system_tick_ms++;
+}
+```
+
+#### Step 4: RX interrupt callbacks
+
+```c
+/* FDCAN1 RX FIFO0 — handles both classic and FD frames */
+void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
+{
+    if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) == 0) return;
+    if (hfdcan->Instance != FDCAN1) return;
+
+    FDCAN_RxHeaderTypeDef RxHeader;
+    uint8_t RxData[64];  /* must be 64 bytes for FD payloads */
+
+    while (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK)
+    {
+        CCX_message_t msg = {0};  /* zero-init clears all FD bitfields */
+
+        msg.ID       = RxHeader.Identifier;
+        msg.IDE_flag = (RxHeader.IdType == FDCAN_EXTENDED_ID) ? 1 : 0;
+        msg.DLC      = (RxHeader.DataLength >> 16) & 0x0FU;
+        msg.FDF      = (RxHeader.FDFormat         == FDCAN_FD_CAN)     ? 1 : 0;
+        msg.BRS      = (RxHeader.BitRateSwitch     == FDCAN_BRS_ON)     ? 1 : 0;
+        msg.ESI      = (RxHeader.ErrorStateIndicator == FDCAN_ESI_PASSIVE) ? 1 : 0;
+
+        uint8_t payloadLen = CCX_FD_DLC_TO_LEN[msg.DLC];
+        for (uint8_t i = 0; i < payloadLen; i++) {
+            msg.Data[i] = RxData[i];
+        }
+
+        CCX_RX_PushMsg(&FDCAN1_fd_instance, &msg);
+    }
+}
+
+/* FDCAN2 RX FIFO1 */
+void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
+{
+    if ((RxFifo1ITs & FDCAN_IT_RX_FIFO1_NEW_MESSAGE) == 0) return;
+    if (hfdcan->Instance != FDCAN2) return;
+
+    FDCAN_RxHeaderTypeDef RxHeader;
+    uint8_t RxData[64];
+
+    while (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO1, &RxHeader, RxData) == HAL_OK)
+    {
+        CCX_message_t msg = {0};
+
+        msg.ID       = RxHeader.Identifier;
+        msg.IDE_flag = (RxHeader.IdType == FDCAN_EXTENDED_ID) ? 1 : 0;
+        msg.DLC      = (RxHeader.DataLength >> 16) & 0x0FU;
+        msg.FDF      = (RxHeader.FDFormat         == FDCAN_FD_CAN)      ? 1 : 0;
+        msg.BRS      = (RxHeader.BitRateSwitch     == FDCAN_BRS_ON)      ? 1 : 0;
+        msg.ESI      = (RxHeader.ErrorStateIndicator == FDCAN_ESI_PASSIVE) ? 1 : 0;
+
+        uint8_t payloadLen = CCX_FD_DLC_TO_LEN[msg.DLC];
+        for (uint8_t i = 0; i < payloadLen; i++) {
+            msg.Data[i] = RxData[i];
+        }
+
+        CCX_RX_PushMsg(&FDCAN2_fd_instance, &msg);
+    }
+}
+```
+
+**`main.c` excerpt** — identical to classic FDCAN (section 2), only replace
+`MX_FDCAN1_Init` with the FD-mode CubeMX-generated function.
+
+---
+
+### 3.2 Bus Monitoring & Statistics
+
+The hardware interface for FDCAN FD bus monitoring is **identical to section 2.2** —
+same `PSR` and `ECR` registers, same `HAL_FDCAN_Stop`/`HAL_FDCAN_Start` recovery.
+Replace function names and instance pointers accordingly.
+
+> **No hardware auto-recovery in FDCAN.** Unlike bxCAN (which has ABOM), the STM32
+> FDCAN peripheral always requires software to clear `CCCR.INIT` to exit bus-off.
+> `HAL_FDCAN_Stop()` / `HAL_FDCAN_Start()` performs this clearing internally.
+> Always use `auto_recovery_enabled = 1` with the recovery function shown in section 2.2.
+
+```c
+/* Reuse FDCAN bus state / error counter functions from section 2.2 */
+static CCX_BusState_t FDCAN1_get_bus_state_fd(const CCX_instance_t *Instance)
+{
+    (void)Instance;
+    uint32_t psr = hfdcan1.Instance->PSR;
+    if (psr & FDCAN_PSR_BO) return CCX_BUS_STATE_OFF;
+    uint32_t ecr = hfdcan1.Instance->ECR;
+    uint8_t tec  = (ecr & FDCAN_ECR_TEC) >> FDCAN_ECR_TEC_Pos;
+    uint8_t rec  = (ecr & FDCAN_ECR_REC) >> FDCAN_ECR_REC_Pos;
+    if (tec > 127 || rec > 127) return CCX_BUS_STATE_PASSIVE;
+    if (tec > 96  || rec > 96)  return CCX_BUS_STATE_WARNING;
+    return CCX_BUS_STATE_ACTIVE;
+}
+
+static void FDCAN1_get_error_counters_fd(const CCX_instance_t *Instance,
+                                         CCX_ErrorCounters_t *Counters)
+{
+    (void)Instance;
+    uint32_t ecr = hfdcan1.Instance->ECR;
+    Counters->TEC = (ecr & FDCAN_ECR_TEC) >> FDCAN_ECR_TEC_Pos;
+    Counters->REC = (ecr & FDCAN_ECR_REC) >> FDCAN_ECR_REC_Pos;
+}
+
+static void FDCAN1_request_recovery_fd(const CCX_instance_t *Instance)
+{
+    (void)Instance;
+    HAL_FDCAN_Stop(&hfdcan1);
+    HAL_FDCAN_Start(&hfdcan1);
+}
+
+/* Add to CAN_App_Init() after CCX_Init_Ex calls */
+static CCX_BusMonitor_t FDCAN1_fd_monitor;
+CCX_BusMonitor_Init(
+    &FDCAN1_fd_instance, &FDCAN1_fd_monitor,
+    FDCAN1_get_bus_state_fd,
+    FDCAN1_get_error_counters_fd,
+    FDCAN1_request_recovery_fd,
+    CAN_COREX_BUS_OFF_RECOVERY_500KBPS_MS,  /* or _1000KBPS_MS — use nominal bitrate */
+    60000,
+    1,   /* auto_recovery_enabled */
+    5
+);
+FDCAN1_fd_monitor.OnBusStateChange      = FDCAN1_bus_state_changed;
+FDCAN1_fd_monitor.OnRecoveryAttempt     = FDCAN1_recovery_attempt;
+FDCAN1_fd_monitor.OnRecoveryFailed      = FDCAN1_recovery_failed;
+FDCAN1_fd_monitor.OnErrorCountersUpdate = FDCAN1_error_counters_updated;
+```
+
+Access statistics the same way as any other instance using `CCX_GetGlobalStats()`.
+
+---
+
+## Platform: TI Connectivity Manager — CAN 2.0
+
+Applies to TI C2000 devices with a **Connectivity Manager (CM)** subsystem
+(Cortex-M4 core, e.g. F28P65x, F29H85x) using the **CANA/CANB** peripheral
+in classic CAN 2.0 mode. For the MCAN FD peripheral on the same subsystem see section 6.
+
+### Prerequisites
+
+- TI device with Connectivity Manager subsystem
+- Driverlib CAN driver (`can.h` / `can.c`)
 - System tick configured (interrupt-driven timer)
 - **Required interrupts enabled in PIE:**
   - CAN RX interrupt for message reception
   - Optional: CAN TX interrupt for transmission complete notification
 
-**Note:** The following examples are for TI Connectivity Manager (Cortex-M4 subsystem), not C2000 control core.
-
 ---
 
-### 3.1 Basic TX/RX Implementation
+### 4.1 Basic TX/RX Implementation
 
 This example demonstrates CAN communication on TI Connectivity Manager with Extended ID support.
 
@@ -2228,9 +2642,9 @@ void CAN_App_SysTick(void)
 
 ---
 
-### 3.2 Bus Monitoring & Statistics
+### 4.2 Bus Monitoring & Statistics
 
-Add bus monitoring for TI platform:
+Add bus monitoring for TI CAN 2.0 platform:
 
 ```c
 /* ========================================================================
@@ -2307,26 +2721,430 @@ void CAN_App_Init(void)
 
 ---
 
+## Platform: TI Connectivity Manager — MCAN (CAN FD mode, CCX\_ENABLE\_CANFD=1)
+
+Applies to TI devices with a **Connectivity Manager (CM)** subsystem that includes the
+**MCAN** peripheral (ISO 11898-1:2015 CAN FD, Bosch M\_CAN IP). Examples target
+**F28P65x / F29H85x** using the CM core driverlib (`mcan.h`). Compile with
+`-DCCX_ENABLE_CANFD=1`.
+
+> MCAN is accessed from the **CM (Cortex-M4) core**, not from the main C28x DSP core.
+> Ensure your SysConfig / linker script targets the CM subsystem.
+
+### Prerequisites
+
+- TI device with CM subsystem and MCAN peripheral
+- TI SDK with CM driverlib (`mcan.h`, `interrupt.h`, `cm.h`)
+- SysConfig: MCAN peripheral configured with FD mode and BRS enabled,
+  payload size 64 bytes
+- System tick configured (CM timer interrupt)
+- `CCX_ENABLE_CANFD=1` compile flag
+
+---
+
+### 5.1 Basic TX/RX Implementation
+
+#### MCAN — CCX field mapping
+
+| CCX `CCX_message_t` field | MCAN `TxBufElement` / `RxBufElement` field |
+|---|---|
+| `ID` (standard) | `id >> 18` (bits [28:18]) |
+| `ID` (extended) | `id & 0x1FFFFFFF` (bits [28:0]) |
+| `IDE_flag` | `xtd` (0=std, 1=ext) |
+| `DLC` | `dlc` (0–15) |
+| `FDF` | `fdf` (0=classic, 1=FD) |
+| `BRS` | `brs` (0=no switch, 1=switch) |
+| `ESI` | `esi` (0=active, 1=passive) |
+| `Data[64]` | `data[32]` (uint16\_t, `memcpy` compatible on little-endian CM) |
+
+#### TX message objects
+
+MCAN uses dedicated **TX buffers** in message RAM. This example uses TX buffer 0 for
+single-message transmission; extend to multiple buffers for higher throughput.
+
+```c
+#define MCAN_TX_BUF_IDX  0U  /* TX buffer index in message RAM */
+```
+
+**File: `can_app.c`**
+
+```c
+#include "can_app.h"
+#include "can_app_msg_rx.h"
+#include "can_app_msg_tx.h"
+#include "can_corex.h"
+#include "mcan.h"
+#include "interrupt.h"
+#include "cm.h"
+#include <string.h>
+
+CCX_instance_t MCAN_instance;
+
+volatile uint32_t system_tick_ms = 0;
+
+/* -------------------------------------------------------------------------
+ * TX — CCX_message_t  →  MCAN_TxBufElement
+ * ------------------------------------------------------------------------- */
+static void MCAN_send_message(const CCX_instance_t *Instance, const CCX_message_t *msg)
+{
+    (void)Instance;
+
+    MCAN_TxBufElement txElem;
+    memset(&txElem, 0, sizeof(txElem));
+
+    /* ID encoding: standard IDs occupy bits [28:18] in message RAM */
+    if (msg->IDE_flag) {
+        txElem.id  = msg->ID & 0x1FFFFFFFU;   /* 29-bit extended */
+        txElem.xtd = 1U;
+    } else {
+        txElem.id  = (msg->ID & 0x7FFU) << 18U;  /* 11-bit standard */
+        txElem.xtd = 0U;
+    }
+
+    txElem.rtr = 0U;
+    txElem.esi = 0U;   /* always Error Active when transmitting */
+    txElem.dlc = msg->DLC;
+    txElem.fdf = msg->FDF;
+    txElem.brs = msg->BRS;
+    txElem.efc = 0U;
+    txElem.mm  = 0U;
+
+    /* memcpy works on Cortex-M4 little-endian: byte N → low/high byte of data[N/2] */
+    uint8_t dataLen = msg->FDF ? CCX_FD_DLC_TO_LEN[msg->DLC] : msg->DLC;
+    memcpy(txElem.data, msg->Data, dataLen);
+
+    MCAN_writeMsgRam(MCANA_BASE, MCAN_MEM_TYPE_BUF, MCAN_TX_BUF_IDX, &txElem);
+    MCAN_setTxBufAddReq(MCANA_BASE, 1U << MCAN_TX_BUF_IDX);
+}
+
+/* Bus free: TX buffer not pending transmission */
+static CCX_BusIsFree_t MCAN_bus_check(const CCX_instance_t *Instance)
+{
+    (void)Instance;
+    return (MCAN_getTxBufReqPended(MCANA_BASE) & (1U << MCAN_TX_BUF_IDX)) ?
+           CCX_BUS_BUSY : CCX_BUS_FREE;
+}
+
+/* -------------------------------------------------------------------------
+ * RX interrupt — MCAN FIFO0  →  CCX_message_t
+ * ------------------------------------------------------------------------- */
+__interrupt void MCAN_RX_ISR(void)
+{
+    uint32_t intrStatus = MCAN_getIntrStatus(MCANA_BASE);
+    MCAN_clearIntrStatus(MCANA_BASE, intrStatus);
+
+    if (intrStatus & MCAN_INTR_SRC_RX_FIFO0_NEW_MSG)
+    {
+        MCAN_RxBufElement rxElem;
+
+        /* Read all pending frames from FIFO0 */
+        while (MCAN_getRxFIFOStatus(MCANA_BASE, MCAN_RX_FIFO_NUM_0) & 0x7FU)
+        {
+            MCAN_readMsgRam(MCANA_BASE, MCAN_MEM_TYPE_FIFO,
+                            0U, MCAN_RX_FIFO_NUM_0, &rxElem);
+            MCAN_writeRxFIFOAck(MCANA_BASE, MCAN_RX_FIFO_NUM_0, 0U);
+
+            CCX_message_t msg = {0};
+
+            /* ID decode — reverse of TX encoding */
+            if (rxElem.xtd) {
+                msg.ID       = rxElem.id & 0x1FFFFFFFU;
+                msg.IDE_flag = 1;
+            } else {
+                msg.ID       = (rxElem.id >> 18U) & 0x7FFU;
+                msg.IDE_flag = 0;
+            }
+
+            msg.DLC = (uint8_t)rxElem.dlc;
+            msg.FDF = (uint8_t)rxElem.fdf;
+            msg.BRS = (uint8_t)rxElem.brs;
+            msg.ESI = (uint8_t)rxElem.esi;
+
+            uint8_t dataLen = msg.FDF ? CCX_FD_DLC_TO_LEN[msg.DLC] : msg.DLC;
+            memcpy(msg.Data, rxElem.data, dataLen);
+
+            CCX_RX_PushMsg(&MCAN_instance, &msg);
+        }
+    }
+
+    Interrupt_clearACKGroup(INTERRUPT_ACK_GROUP9);
+}
+
+/* -------------------------------------------------------------------------
+ * Initialization
+ * ------------------------------------------------------------------------- */
+
+/* Bit timing values — adjust to your CM clock frequency.
+ * Example: 40 MHz CM clock, 500 kbit/s nominal, 2 Mbit/s data phase.
+ * Use TI's Bit Rate Calculator or SysConfig to derive exact values. */
+static const MCAN_BitTimingParams nomBitTiming = {
+    .nomRatePrescalar  = 0U,    /* prescaler = 1 */
+    .nomTimeSeg1       = 67U,   /* TSEG1 */
+    .nomTimeSeg2       = 12U,   /* TSEG2 */
+    .nomSynchJumpWidth = 12U,
+};
+static const MCAN_BitTimingParams dataBitTiming = {
+    .dataRatePrescalar  = 0U,
+    .dataTimeSeg1       = 15U,
+    .dataTimeSeg2       = 4U,
+    .dataSynchJumpWidth = 4U,
+};
+
+static const MCAN_InitParams mcanInitParams = {
+    .fdMode         = 1U,   /* CAN FD enabled */
+    .brsEnable      = 1U,   /* bit-rate switch enabled */
+    .txpEnable      = 0U,
+    .efbi           = 0U,
+    .pxhddisable    = 0U,
+    .darEnable      = 0U,   /* automatic retransmission enabled */
+    .wkupReqEnable  = 1U,
+    .autoWkupEnable = 1U,
+    .emulationEnable= 0U,
+    .tdcEnable      = 0U,
+    .wdcPreload     = 0xFFU,
+};
+
+/* Message RAM layout — adjust element counts to your application */
+static const MCAN_MsgRAMConfigParams msgRamParams = {
+    .flssa         = 0U,       /* Standard ID filter list start address */
+    .lss           = 1U,       /* 1 standard filter element */
+    .flesa         = 0x10U,    /* Extended ID filter list start address */
+    .lse           = 1U,       /* 1 extended filter element */
+    .txStartAddr   = 0x80U,    /* TX buffer start address */
+    .txBufNum      = 1U,       /* 1 TX buffer (extend as needed) */
+    .txFIFOSize    = 0U,
+    .txBufMode     = 0U,       /* dedicated TX buffers */
+    .txEventFIFOStartAddr = 0U,
+    .txEventFIFODepth     = 0U,
+    .rxFIFO0startAddr     = 0x100U,
+    .rxFIFO0size          = 8U,    /* 8 elements in RX FIFO0 */
+    .rxFIFO0waterMark     = 0U,
+    .rxFIFO0OpMode        = 0U,    /* blocking mode */
+    .rxFIFO1startAddr     = 0U,
+    .rxFIFO1size          = 0U,
+    .rxFIFO1waterMark     = 0U,
+    .rxFIFO1OpMode        = 0U,
+    .rxBufStartAddr       = 0U,
+    .rxBufElemSize        = MCAN_ELEM_SIZE_64BYTES,
+    .rxFIFO0ElemSize      = MCAN_ELEM_SIZE_64BYTES,
+    .rxFIFO1ElemSize      = MCAN_ELEM_SIZE_64BYTES,
+    .txBufElemSize        = MCAN_ELEM_SIZE_64BYTES,
+};
+
+void CAN_App_Init(void)
+{
+    CCX_tick_variable_register(&system_tick_ms);
+
+    /* ---- MCAN peripheral init ---- */
+    MCAN_setOpMode(MCANA_BASE, MCAN_OPERATION_MODE_INIT);
+
+    MCAN_init(MCANA_BASE, &mcanInitParams);
+    MCAN_setBitTime(MCANA_BASE, &nomBitTiming);
+    MCAN_setDataBitTime(MCANA_BASE, &dataBitTiming);
+    MCAN_setMsgRamConfig(MCANA_BASE, &msgRamParams);
+
+    /* Accept all non-matching frames into FIFO0 */
+    MCAN_setGlobalFilterConfig(MCANA_BASE,
+        MCAN_REJECT_REMOTE_FRAMES_EXT,
+        MCAN_REJECT_REMOTE_FRAMES_STD,
+        MCAN_GBL_FILTER_ACCEPT_INTO_RX_FIFO0,
+        MCAN_GBL_FILTER_ACCEPT_INTO_RX_FIFO0);
+
+    /* Enable RX FIFO0 new message interrupt */
+    MCAN_enableIntr(MCANA_BASE, MCAN_INTR_SRC_RX_FIFO0_NEW_MSG, 1U);
+    MCAN_enableIntrLine(MCANA_BASE, MCAN_INTR_LINE_NUM_0, 1U);
+
+    Interrupt_register(INT_MCANA_0, MCAN_RX_ISR);
+    Interrupt_enable(INT_MCANA_0);
+
+    MCAN_setOpMode(MCANA_BASE, MCAN_OPERATION_MODE_NORMAL);
+
+    /* ---- CAN CoreX instance init ---- */
+    CCX_Init_Ex(&MCAN_instance,
+                CAN1_rx_table, CAN1_tx_table,
+                CAN1_RX_END,   CAN1_TX_END,
+                MCAN_send_message, MCAN_bus_check,
+                CAN1_rx_unreg_parser,
+                CCX_FRAME_FORMAT_FD,
+                1);   /* BRS_Default = 1 */
+
+    /* Set FD-specific RX fields after Init */
+    CAN1_rx_table[2].FDF = 1;  /* FD wildcard entry */
+}
+
+void CAN_App_Process(void)
+{
+    CCX_Poll(&MCAN_instance);
+}
+
+void CAN_App_SysTick(void)
+{
+    system_tick_ms++;
+}
+```
+
+---
+
+### 5.2 Bus Monitoring & Statistics
+
+#### Hardware interface functions
+
+```c
+/* -------------------------------------------------------------------------
+ * Bus state — MCAN_ProtocolStatus
+ * ------------------------------------------------------------------------- */
+static CCX_BusState_t MCAN_get_bus_state(const CCX_instance_t *Instance)
+{
+    (void)Instance;
+
+    MCAN_ProtocolStatus psr;
+    MCAN_getProtocolStatus(MCANA_BASE, &psr);
+
+    if (psr.busOffStatus) return CCX_BUS_STATE_OFF;
+
+    /* Error counters for Warning / Passive thresholds */
+    MCAN_ErrCntStatus errs;
+    MCAN_getErrCounters(MCANA_BASE, &errs);
+
+    uint8_t tec = (uint8_t)errs.transErrLogCnt;
+    uint8_t rec = (uint8_t)errs.recErrCnt;
+
+    if (tec > 127 || rec > 127) return CCX_BUS_STATE_PASSIVE;
+    if (tec > 96  || rec > 96)  return CCX_BUS_STATE_WARNING;
+
+    return CCX_BUS_STATE_ACTIVE;
+}
+
+static void MCAN_get_error_counters(const CCX_instance_t *Instance,
+                                    CCX_ErrorCounters_t *Counters)
+{
+    (void)Instance;
+
+    MCAN_ErrCntStatus errs;
+    MCAN_getErrCounters(MCANA_BASE, &errs);
+    Counters->TEC = (uint8_t)errs.transErrLogCnt;
+    Counters->REC = (uint8_t)errs.recErrCnt;
+}
+
+/* Bus-off recovery: clear CCCR.INIT by switching to normal operation mode */
+static void MCAN_request_recovery(const CCX_instance_t *Instance)
+{
+    (void)Instance;
+    MCAN_setOpMode(MCANA_BASE, MCAN_OPERATION_MODE_NORMAL);
+}
+```
+
+#### ⚠️ Note: MCAN hardware auto bus-off recovery
+
+Standard MCAN (Bosch M\_CAN) does **not** automatically recover from bus-off.
+When bus-off occurs, `CCCR.INIT` is set to 1 by hardware. Recovery requires software
+to explicitly call `MCAN_setOpMode(NORMAL)` after the required bus idle time. The
+`CCX_BusMonitor` `recovery_delay` parameter controls this timing — set it to at least
+the value matching your nominal bit rate:
+
+```c
+/* 500 kbit/s nominal → minimum 3 ms recovery delay */
+#define MY_RECOVERY_DELAY_MS  CAN_COREX_BUS_OFF_RECOVERY_500KBPS_MS
+```
+
+> If a future device variant or custom IP provides hardware auto-recovery (automatically
+> clearing `CCCR.INIT`), set `auto_recovery_enabled = 0` and use the bus monitor for
+> monitoring only — calling `MCAN_setOpMode(NORMAL)` during active hardware recovery
+> may interrupt the recovery sequence.
+
+#### Initialization
+
+```c
+/* Add to CAN_App_Init() after CCX_Init_Ex */
+static CCX_BusMonitor_t MCAN_monitor;
+
+CCX_BusMonitor_Init(
+    &MCAN_instance,
+    &MCAN_monitor,
+    MCAN_get_bus_state,
+    MCAN_get_error_counters,
+    MCAN_request_recovery,
+    CAN_COREX_BUS_OFF_RECOVERY_500KBPS_MS,  /* recovery_delay — match nominal bitrate */
+    60000,   /* successful_run_time: 60 s before resetting recovery counter */
+    1,       /* auto_recovery_enabled */
+    5        /* max_recovery_attempts before grace period */
+);
+
+MCAN_monitor.OnBusStateChange  = MCAN_bus_state_changed;
+MCAN_monitor.OnRecoveryAttempt = MCAN_recovery_attempt;
+MCAN_monitor.OnRecoveryFailed  = MCAN_recovery_failed;
+```
+
+#### Callbacks (example)
+
+```c
+static void MCAN_bus_state_changed(CCX_instance_t *Instance,
+                                   CCX_BusState_t OldState,
+                                   CCX_BusState_t NewState,
+                                   void *UserData)
+{
+    (void)Instance; (void)UserData;
+    if (NewState == CCX_BUS_STATE_OFF) {
+        /* Log or signal application — recovery starts automatically */
+    }
+}
+
+static void MCAN_recovery_attempt(CCX_instance_t *Instance,
+                                  uint8_t AttemptNumber, void *UserData)
+{
+    (void)Instance; (void)UserData;
+    /* Optionally log attempt number */
+}
+
+static void MCAN_recovery_failed(CCX_instance_t *Instance, void *UserData)
+{
+    (void)Instance; (void)UserData;
+    /* Max attempts reached — bus health seriously degraded */
+}
+```
+
+#### Statistics
+
+```c
+void CAN_App_PrintMCANStats(void)
+{
+    const CCX_GlobalStats_t *stats = CCX_GetGlobalStats(&MCAN_instance);
+
+    /* Global counters */
+    /* stats->total_rx_messages, total_tx_messages,
+       rx_buffer_overflows, tx_buffer_overflows,
+       parser_calls_count, timeout_calls_count */
+
+    /* Bus monitor */
+    CCX_BusState_t state = CCX_BusMonitor_GetState(&MCAN_instance);
+    if (MCAN_instance.BusMonitor) {
+        /* MCAN_instance.BusMonitor->stats.bus_off_count        */
+        /* MCAN_instance.BusMonitor->stats.error_counters.TEC   */
+        /* MCAN_instance.BusMonitor->stats.peak_error_counters  */
+    }
+    (void)state;
+}
+```
+
+---
+
 ## Summary
 
 This implementation guide covers:
 
 1. **Recommended file structure** for maintainable CAN applications
-2. **STM32 HAL implementation** with:
-   - Dual CAN instance support (CAN1/CAN2)
-   - Standard and Extended ID handling
-   - Two callback styles (separate vs. shared)
-   - Complete bus monitoring integration
-3. **TI Connectivity Manager implementation** with:
-   - Extended ID support
-   - Hardware-specific message object handling
-   - Bus monitoring for TI platform
+2. **STM32 bxCAN** (F1/F2/F4): dual-instance, standard + extended IDs, shared/separate callbacks, bus monitoring. Note on ABOM hardware auto-recovery.
+3. **STM32 FDCAN — classic mode** (G4/H7/U5): FDCAN peripheral in CAN 2.0 mode, different register layout (PSR/ECR), FIFO-based RX.
+4. **STM32 FDCAN — FD mode** (`CCX_ENABLE_CANFD=1`): 64-byte payloads, FDF/BRS/ESI field mapping, `CCX_Init_Ex`, RX table FD wildcards (`CCX_DLC_ANY` + `.FDF=1` after Init), `CCX_FD_DLC_t` named constants.
+5. **TI CM CAN 2.0** (F28P65x CANA/B): Connectivity Manager Cortex-M4, driverlib `CAN_*` API, message object TX/RX, bus monitoring via `CAN_O_ERR` register.
+6. **TI CM MCAN FD** (`CCX_ENABLE_CANFD=1`): MCAN peripheral on CM subsystem, `MCAN_TxBufElement`/`MCAN_RxBufElement` field mapping, ID bit-shift encoding, `memcpy`-compatible data transfer, bus monitoring via `MCAN_getProtocolStatus`.
 
 **Key takeaways:**
-- Always enable required interrupts in your HAL/Driverlib configuration
-- Use separate instances for independent CAN peripherals
-- Implement hardware interface functions specific to your platform
-- Bus monitoring provides automatic recovery and health tracking
-- Statistics help diagnose communication issues
+- Enable required interrupts and configure message RAM / filters before starting the peripheral
+- Use `CCX_Init_Ex` with `CCX_FRAME_FORMAT_FD` for FD instances; `CCX_Init` for classic
+- Set `FDF` in RX table entries **after** `CCX_Init` / `CCX_Init_Ex` (Init zeroes it to prevent stack-garbage issues)
+- If hardware auto bus-off recovery is active (bxCAN ABOM, or custom platform feature), use `auto_recovery_enabled = 0` — let hardware recover, use the library only for monitoring
+- `CCX_FD_DLC_TO_LEN[dlc]` converts raw DLC 0–15 to actual byte count; `CCX_FD_LenToDLC(n)` does the reverse
+- Bus monitoring `recovery_delay` should be ≥ the ISO 11898-1 minimum for your nominal bit rate (see `CAN_COREX_BUS_OFF_RECOVERY_*_MS` macros)
 
-For advanced features like ISO-TP and Network replication, refer to `ADVANCED_FEATURES.md` (future document).
+For advanced features (ISO-TP, Network replication) refer to `ADVANCED_FEATURES.md` (future document).

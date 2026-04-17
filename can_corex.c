@@ -48,6 +48,22 @@ void CCX_tick_variable_register(CCX_TIME_t *Variable)
 
 extern void CCX_net_push(const CCX_instance_t *Instance, const CCX_message_t *msg, uint8_t FromTxFunc);
 
+#if CCX_ENABLE_CANFD
+const uint8_t CCX_FD_DLC_TO_LEN[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64};
+
+uint8_t CCX_FD_LenToDLC(uint8_t len)
+{
+    for (uint8_t i = 0; i < 16; i++)
+    {
+        if (CCX_FD_DLC_TO_LEN[i] >= len)
+        {
+            return i;
+        }
+    }
+    return 15;
+}
+#endif
+
 /* Forward declaration for bus monitoring (v1.3.0) */
 static void CCX_BusMonitor_Update(CCX_instance_t *Instance);
 
@@ -67,10 +83,18 @@ CCX_Status_t CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
     {
         return CCX_NULL_PTR;
     }
+#if CCX_ENABLE_CANFD
+    if (msg->FDF == 0 && msg->DLC > 8)
+    {
+        return CCX_WRONG_ARG;
+    }
+    /* FD frames: DLC 0-15 all valid */
+#else
     if (msg->DLC > 8)
     {
         return CCX_WRONG_ARG;
     }
+#endif
 
     uint16_t next_head = Instance->RxHead + 1;
     if (next_head >= CCX_RX_BUFFER_SIZE)
@@ -145,18 +169,35 @@ static void CCX_RX_BuildHash(CCX_instance_t *Instance)
  */
 static inline CCX_MsgRegStatus_t CCX_RX_ProcessMatch(CCX_instance_t *Instance, CCX_message_t *Msg, uint16_t index)
 {
-    /* Check DLC: CCX_DLC_ANY accepts any DLC (0-8), otherwise exact match */
     uint8_t dlc_match = 0;
+#if CCX_ENABLE_CANFD
+    uint8_t fdf_match = 1; /* default: FDF not checked */
+
     if (Instance->CCX_RX_table[index].DLC == CCX_DLC_ANY)
     {
-        dlc_match = 1; /* Any DLC accepted */
+        /* Wildcard: any DLC accepted; FDF in entry controls which frame format matches */
+        dlc_match = 1;
+        fdf_match = (Instance->CCX_RX_table[index].FDF == Msg->FDF);
     }
     else
     {
-        dlc_match = (Instance->CCX_RX_table[index].DLC == Msg->DLC); /* Exact match */
+        /* Exact DLC match: FDF not checked — backwards compat for old entries */
+        dlc_match = (Instance->CCX_RX_table[index].DLC == Msg->DLC);
+    }
+
+    if (dlc_match && fdf_match && (Instance->CCX_RX_table[index].IDE_flag == Msg->IDE_flag))
+#else
+    if (Instance->CCX_RX_table[index].DLC == CCX_DLC_ANY)
+    {
+        dlc_match = 1;
+    }
+    else
+    {
+        dlc_match = (Instance->CCX_RX_table[index].DLC == Msg->DLC);
     }
 
     if (dlc_match && (Instance->CCX_RX_table[index].IDE_flag == Msg->IDE_flag))
+#endif
     {
         if (NULL != Instance->CCX_RX_table[index].Parser)
         {
@@ -304,10 +345,21 @@ CCX_Status_t CCX_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
     {
         return CCX_NULL_PTR;
     }
+#if CCX_ENABLE_CANFD
+    if (msg->FDF == 0 && msg->DLC > 8)
+    {
+        return CCX_WRONG_ARG;
+    }
+    if (Instance->FrameFormat == CCX_FRAME_FORMAT_CLASSIC && msg->FDF == 1)
+    {
+        return CCX_WRONG_ARG; /* classic instance rejects FD frames */
+    }
+#else
     if (msg->DLC > 8)
     {
         return CCX_WRONG_ARG;
     }
+#endif
 
     uint16_t next_head = Instance->TxHead + 1;
     if (next_head >= CCX_TX_BUFFER_SIZE)
@@ -333,24 +385,48 @@ CCX_Status_t CCX_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
 static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
 {
     assert(NULL != Instance);
+#if CCX_ENABLE_CANFD
+    uint8_t Tmp[64];
+    memset(Tmp, 0x00, 64);
+#else
     uint8_t Tmp[8];
     memset(Tmp, 0x00, 8);
+#endif
 
     for (uint16_t i = 0; i < Instance->TxTableSize; i++)
     {
         if (CCX_GET_TICK - Instance->CCX_TX_table[i].LastTick >= Instance->CCX_TX_table[i].SendFreq)
         {
             Instance->CCX_TX_table[i].LastTick = CCX_GET_TICK;
-            CopyBuf(Instance->CCX_TX_table[i].Data, Tmp, Instance->CCX_TX_table[i].DLC);
+
+#if CCX_ENABLE_CANFD
+            /* Clamp FDF: classic instances can never transmit FD frames even if table entry has FDF=1 */
+            uint8_t fdf = (Instance->FrameFormat == CCX_FRAME_FORMAT_FD)
+                              ? (uint8_t)Instance->CCX_TX_table[i].FDF
+                              : 0;
+            uint8_t len = fdf ? CCX_FD_DLC_TO_LEN[Instance->CCX_TX_table[i].DLC]
+                              : Instance->CCX_TX_table[i].DLC;
+#else
+            uint8_t len = Instance->CCX_TX_table[i].DLC;
+#endif
+            CopyBuf(Instance->CCX_TX_table[i].Data, Tmp, len);
             if (NULL != Instance->CCX_TX_table[i].Parser)
             {
                 Instance->CCX_TX_table[i].Parser(Instance, Tmp, i, Instance->CCX_TX_table[i].UserData);
             }
+
+#if CCX_ENABLE_CANFD
+            CCX_message_t msg = {.ID = Instance->CCX_TX_table[i].ID,
+                                 .DLC = Instance->CCX_TX_table[i].DLC,
+                                 .IDE_flag = Instance->CCX_TX_table[i].IDE_flag,
+                                 .FDF = fdf,
+                                 .BRS = fdf ? (uint8_t)Instance->CCX_TX_table[i].BRS : 0};
+#else
             CCX_message_t msg = {.ID = Instance->CCX_TX_table[i].ID,
                                  .DLC = Instance->CCX_TX_table[i].DLC,
                                  .IDE_flag = Instance->CCX_TX_table[i].IDE_flag};
-
-            memcpy(msg.Data, Tmp, 8);
+#endif
+            memcpy(msg.Data, Tmp, len);
 
             CCX_TX_PushMsg(Instance, &msg);
         }
@@ -435,6 +511,12 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
         for (uint16_t i = 0; i < RxTableSize; i++)
         {
             Instance->CCX_RX_table[i].LastTick = current_tick;
+#if CCX_ENABLE_CANFD
+            /* FDF did not exist in v1.x; stack-allocated entries may carry garbage.
+             * Zero it here so old code gets classic-frame matching by default.
+             * FD-specific fields must be set AFTER CCX_Init/CCX_Init_Ex. */
+            Instance->CCX_RX_table[i].FDF = 0;
+#endif
         }
     }
 
@@ -452,6 +534,11 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
     /* Bus monitoring disabled by default (v1.3.0) */
     Instance->BusMonitor = NULL;
     Instance->OnMessageTransmitted = NULL;
+
+#if CCX_ENABLE_CANFD
+    Instance->FrameFormat = CCX_FRAME_FORMAT_CLASSIC;
+    Instance->BRS_Default = 0;
+#endif
 
 #if defined(CCX_RX_SEARCH_HASH)
     /* Build hash table for RX messages */
@@ -775,3 +862,23 @@ void CCX_RX_RebuildHash(CCX_instance_t *Instance)
     (void)Instance; /* Suppress unused parameter warning */
 #endif
 }
+
+#if CCX_ENABLE_CANFD
+CCX_Status_t CCX_Init_Ex(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CCX_TX_table_t *CCX_TX_table,
+                         uint16_t RxTableSize, uint16_t TxTableSize,
+                         void (*SendFunction)(const CCX_instance_t *Instance, const CCX_message_t *msg),
+                         CCX_BusIsFree_t (*BusCheck)(const CCX_instance_t *Instance),
+                         void (*ParserUnregMsg)(const CCX_instance_t *Instance, CCX_message_t *Msg),
+                         CCX_frame_format_t format, uint8_t brs_default)
+{
+    CCX_Status_t status = CCX_Init(Instance, CCX_RX_table, CCX_TX_table, RxTableSize, TxTableSize,
+                                   SendFunction, BusCheck, ParserUnregMsg);
+    if (status != CCX_OK)
+    {
+        return status;
+    }
+    Instance->FrameFormat = format;
+    Instance->BRS_Default = brs_default;
+    return CCX_OK;
+}
+#endif

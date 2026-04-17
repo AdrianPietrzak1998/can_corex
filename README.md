@@ -1,17 +1,17 @@
 # CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-1.4.4-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-2.0.0-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-253%2F253%20passing-success.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-275--279%20classic%20%7C%20314--318%20FD%20passing-success.svg)]()
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
 
 
 ## Overview
 
-CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, ISO-TP transport protocol, and comprehensive bus health monitoring with automatic error recovery. Version 1.4.0 introduced compile-time configurable RX message lookup strategies for optimized performance.
+CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, ISO-TP transport protocol, and comprehensive bus health monitoring with automatic error recovery. Version 2.0.0 adds CAN FD support (64-byte payloads, BRS, ESI) via a compile-time feature gate, alongside existing CAN 2.0 support. Version 1.4.0 introduced compile-time configurable RX message lookup strategies for optimized performance.
 
 ## Table of Contents
 
@@ -41,6 +41,9 @@ CAN CoreX is a lightweight, modular CAN bus communication library designed for e
 - **ISO-TP Protocol**: ISO 15765-2 transport layer for multi-frame messages
 - **Extended ID Support**: Full support for both Standard (11-bit) and Extended (29-bit) CAN IDs
 - **Wildcard Matching**: Accept any DLC with `CCX_DLC_ANY` in RX table
+- **CAN FD Support** (`-DCCX_ENABLE_CANFD=1`): 64-byte payloads, BRS, ESI, per-instance frame format selection
+- **FD DLC Encoding**: Non-linear DLC 0-15 map (0-8 = same as classic, 9-15 = 12/16/20/24/32/48/64 bytes); `CCX_FD_DLC_t` named constants
+- **Backwards-Compatible FD Matching**: Exact-DLC RX entries match both classic and FD frames; `CCX_DLC_ANY` + `FDF` flag for format-specific wildcards
 - **Bus Management**: Automatic bus-off detection and recovery with configurable retry strategy
 - **Global Statistics**: Real-time monitoring of RX/TX counters, buffer overflows, and parser calls
 
@@ -200,6 +203,7 @@ CCX_Status_t CCX_Init(
 - Initializes all buffer pointers to zero
 - Clears all buffers
 - Sets LastTick in tables to current time
+- In FD builds, zeroes the `FDF` bitfield of every RX table entry — set FD-specific fields **after** calling Init
 
 **Example**:
 ```c
@@ -220,6 +224,75 @@ CCX_Status_t status = CCX_Init(
     my_timeout_callback,
     NULL
 );
+```
+
+---
+
+#### `CCX_Init_Ex` (CAN FD builds only)
+
+```c
+CCX_Status_t CCX_Init_Ex(
+    CCX_instance_t *Instance,
+    CCX_RX_table_t *CCX_RX_table,
+    CCX_TX_table_t *CCX_TX_table,
+    uint16_t RxTableSize,
+    uint16_t TxTableSize,
+    void (*SendFunction)(const CCX_instance_t *Instance, const CCX_message_t *msg),
+    CCX_BusIsFree_t (*BusCheck)(const CCX_instance_t *Instance),
+    void (*ParserUnregMsg)(const CCX_instance_t *Instance, CCX_message_t *Msg),
+    CCX_frame_format_t FrameFormat,
+    uint8_t BRS_Default
+);
+```
+
+**Description**: Extended initialization for CAN FD instances. Available only when compiled with `-DCCX_ENABLE_CANFD=1`.
+
+**Additional Parameters**:
+- `FrameFormat`: `CCX_FRAME_FORMAT_CLASSIC` or `CCX_FRAME_FORMAT_FD`; controls whether the instance uses CAN 2.0 or CAN FD frames
+- `BRS_Default`: Default Bit-Rate Switch flag for TX table messages (`0` or `1`)
+
+**Notes**:
+- A `CCX_FRAME_FORMAT_CLASSIC` instance rejects `CCX_TX_PushMsg` calls with `FDF=1`
+- A `CCX_FRAME_FORMAT_FD` instance accepts both classic (FDF=0) and FD (FDF=1) frames
+- Same zeroing of `FDF` in RX table entries applies as with `CCX_Init`
+
+**Example**:
+```c
+#if CCX_ENABLE_CANFD
+CCX_instance_t can_fd;
+
+CCX_Init_Ex(
+    &can_fd,
+    rx_table, tx_table,
+    rx_size, tx_size,
+    hw_send_fd, hw_bus_check,
+    NULL,
+    CCX_FRAME_FORMAT_FD,  // This instance handles FD frames
+    1                     // BRS enabled by default for TX table messages
+);
+
+// Set FD-specific RX entry fields AFTER Init
+rx_table[0].FDF = 1;
+#endif
+```
+
+---
+
+#### `CCX_FD_LenToDLC` / `CCX_MsgPayloadLen` (CAN FD builds only)
+
+```c
+uint8_t CCX_FD_LenToDLC(uint8_t len);
+uint8_t CCX_MsgPayloadLen(const CCX_message_t *msg);
+```
+
+**`CCX_FD_LenToDLC`**: Converts a byte length (0-64) to the corresponding CAN FD DLC code (0-15).
+
+**`CCX_MsgPayloadLen`**: Returns the actual payload length of a message in bytes (uses `DLC` directly for classic frames; applies the FD length table for FD frames).
+
+**Example**:
+```c
+uint8_t dlc = CCX_FD_LenToDLC(48);    // returns 14 (CCX_FD_DLC_48B)
+uint8_t len = CCX_MsgPayloadLen(&msg); // returns actual byte count
 ```
 
 ---
@@ -299,11 +372,11 @@ CCX_Status_t CCX_RX_PushMsg(
 **Returns**:
 - `CCX_OK`: Message added successfully
 - `CCX_NULL_PTR`: NULL pointer provided
-- `CCX_WRONG_ARG`: Invalid DLC (> 8)
+- `CCX_WRONG_ARG`: Invalid DLC (> 8 in classic build; > 15 in FD build); also returned for FD frames pushed to a classic instance
 - `CCX_BUS_TOO_BUSY`: Buffer is full
 
 **Behavior**:
-- Validates DLC (must be 0-8)
+- Validates DLC (0-8 in classic; 0-15 in FD)
 - Records receive timestamp
 - Triggers network replication if configured
 - Returns error if buffer full (non-blocking)
@@ -345,11 +418,11 @@ CCX_Status_t CCX_TX_PushMsg(
 **Returns**:
 - `CCX_OK`: Message queued successfully
 - `CCX_NULL_PTR`: NULL pointer provided
-- `CCX_WRONG_ARG`: Invalid DLC (> 8)
+- `CCX_WRONG_ARG`: Invalid DLC (> 8 in classic build; > 15 in FD build); also returned for FD frames pushed to a classic instance
 - `CCX_BUS_TOO_BUSY`: Buffer is full
 
 **Behavior**:
-- Validates DLC (must be 0-8)
+- Validates DLC (0-8 in classic; 0-15 in FD)
 - Queues message for transmission
 - Triggers network replication if configured
 - Returns error if buffer full (non-blocking)
@@ -408,7 +481,7 @@ while (1) {
 typedef enum {
     CCX_OK = 0,           // Operation successful
     CCX_NULL_PTR,         // NULL pointer provided
-    CCX_WRONG_ARG,        // Invalid argument (e.g., DLC > 8)
+    CCX_WRONG_ARG,        // Invalid argument (e.g., DLC > 8 in classic, DLC > 15 in FD)
     CCX_BUS_TOO_BUSY      // Buffer full, message dropped
 } CCX_Status_t;
 ```
@@ -419,27 +492,74 @@ typedef enum {
 
 ### `CCX_message_t`
 
+**Classic build** (`CCX_ENABLE_CANFD=0`, default):
 ```c
 typedef struct {
     uint32_t ID;          // CAN message ID
     uint8_t Data[8];      // Message data (0-8 bytes)
     uint8_t DLC : 4;      // Data Length Code (0-8)
     uint8_t IDE_flag : 1; // 0=Standard, 1=Extended ID
+} CCX_message_t;          // sizeof == 16
+```
+
+**FD build** (`CCX_ENABLE_CANFD=1`):
+```c
+typedef struct {
+    uint32_t ID;          // CAN message ID
+    uint8_t Data[64];     // Message data (up to 64 bytes)
+    uint8_t DLC : 4;      // DLC code (0-15; use CCX_FD_DLC_t constants)
+    uint8_t IDE_flag : 1; // 0=Standard, 1=Extended ID
+    uint8_t FDF : 1;      // 0=Classic frame, 1=FD frame
+    uint8_t BRS : 1;      // Bit-Rate Switch
+    uint8_t ESI : 1;      // Error State Indicator
 } CCX_message_t;
+```
+
+**`CCX_FD_DLC_t` enum** (FD build only) — named DLC constants:
+```c
+typedef enum {
+    CCX_FD_DLC_0B  = 0,   CCX_FD_DLC_1B  = 1,
+    CCX_FD_DLC_2B  = 2,   CCX_FD_DLC_3B  = 3,
+    CCX_FD_DLC_4B  = 4,   CCX_FD_DLC_5B  = 5,
+    CCX_FD_DLC_6B  = 6,   CCX_FD_DLC_7B  = 7,
+    CCX_FD_DLC_8B  = 8,   CCX_FD_DLC_12B = 9,
+    CCX_FD_DLC_16B = 10,  CCX_FD_DLC_20B = 11,
+    CCX_FD_DLC_24B = 12,  CCX_FD_DLC_32B = 13,
+    CCX_FD_DLC_48B = 14,  CCX_FD_DLC_64B = 15,
+} CCX_FD_DLC_t;
 ```
 
 ---
 
 ### `CCX_RX_table_t`
 
+**Classic build** (`CCX_ENABLE_CANFD=0`, default):
 ```c
 typedef struct {
     uint32_t ID;          // Expected message ID
-    uint8_t DLC : 4;      // Expected DLC
+    uint8_t DLC : 4;      // Expected DLC (0-8); CCX_DLC_ANY (15) = accept any
     uint8_t IDE_flag : 1; // Expected ID type
     CCX_TIME_t TimeOut;   // Timeout period (0 = disabled)
-    void (*Parser)(const CCX_instance_t *Instance, 
-                   CCX_message_t *Msg, 
+    void (*Parser)(const CCX_instance_t *Instance,
+                   CCX_message_t *Msg,
+                   uint16_t Slot);
+    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot);
+    CCX_TIME_t LastTick;  // Last receive time (auto-managed)
+} CCX_RX_table_t;
+```
+
+**FD build** (`CCX_ENABLE_CANFD=1`):
+```c
+typedef struct {
+    uint32_t ID;          // Expected message ID
+    uint8_t DLC : 5;      // Expected DLC (0-15); CCX_DLC_ANY (16) = accept any
+    uint8_t IDE_flag : 1; // Expected ID type
+    uint8_t FDF : 1;      // Frame format filter (only checked when DLC == CCX_DLC_ANY)
+                          //   0 = wildcard matches classic frames
+                          //   1 = wildcard matches FD frames
+    CCX_TIME_t TimeOut;   // Timeout period (0 = disabled)
+    void (*Parser)(const CCX_instance_t *Instance,
+                   CCX_message_t *Msg,
                    uint16_t Slot);
     void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot);
     CCX_TIME_t LastTick;  // Last receive time (auto-managed)
@@ -452,17 +572,37 @@ typedef struct {
 - Provide `Parser` callback to process matched messages
 - Provide `TimeoutCallback` to handle timeout events (optional)
 - `LastTick` is automatically updated by library
+- In FD builds: `FDF` is **zeroed by `CCX_Init`/`CCX_Init_Ex`** — set it after initialization if needed
+- Exact-DLC entries (`DLC != CCX_DLC_ANY`) never check `FDF` — they match both classic and FD frames with the same DLC (backwards-compatible)
 
 ---
 
 ### `CCX_TX_table_t`
 
+**Classic build** (`CCX_ENABLE_CANFD=0`, default):
 ```c
 typedef struct {
     uint32_t ID;          // Message ID to send
     uint8_t *Data;        // Pointer to data buffer
-    uint8_t DLC : 4;      // Data length
+    uint8_t DLC : 4;      // Data length (0-8)
     uint8_t IDE_flag : 1; // ID type
+    CCX_TIME_t SendFreq;  // Send period in ticks
+    void (*Parser)(const CCX_instance_t *Instance,
+                   uint8_t *DataToSend,
+                   uint16_t Slot);
+    CCX_TIME_t LastTick;  // Last send time (auto-managed)
+} CCX_TX_table_t;
+```
+
+**FD build** (`CCX_ENABLE_CANFD=1`):
+```c
+typedef struct {
+    uint32_t ID;          // Message ID to send
+    uint8_t *Data;        // Pointer to data buffer (up to 64 bytes)
+    uint8_t DLC : 4;      // DLC code (0-15)
+    uint8_t IDE_flag : 1; // ID type
+    uint8_t FDF : 1;      // 1 = send as FD frame (clamped to instance FrameFormat)
+    uint8_t BRS : 1;      // Bit-Rate Switch (overrides BRS_Default from CCX_Init_Ex)
     CCX_TIME_t SendFreq;  // Send period in ticks
     void (*Parser)(const CCX_instance_t *Instance,
                    uint8_t *DataToSend,
@@ -474,9 +614,10 @@ typedef struct {
 **Usage**:
 - Define periodic messages with ID, DLC, IDE_flag
 - Set `SendFreq` to transmission period (in ticks)
-- `Data` points to data buffer
+- `Data` points to data buffer (must be at least `CCX_FD_DLC_TO_LEN[DLC]` bytes in FD builds)
 - Optional `Parser` callback to update data before sending
 - `LastTick` is automatically updated by library
+- In FD builds: `FDF=1` on a classic-format instance is silently ignored (clamped to `FDF=0`)
 
 ---
 
@@ -912,26 +1053,28 @@ CAN CoreX supports wildcard DLC matching in RX tables using `CCX_DLC_ANY`.
 
 ### Overview
 
-By default, RX table entries match exact DLC values. Using `CCX_DLC_ANY` allows accepting messages with any DLC (0-8):
+By default, RX table entries match exact DLC values. Using `CCX_DLC_ANY` allows accepting messages with any DLC:
 
 ```c
 CCX_RX_table_t rx_table[] = {
     // Exact match - only DLC=8
     {.ID = 0x100, .DLC = 8, .IDE_flag = 0, .Parser = my_parser},
-    
-    // Wildcard - accepts any DLC (0-8)
+
+    // Wildcard - accepts any DLC
     {.ID = 0x200, .DLC = CCX_DLC_ANY, .IDE_flag = 0, .Parser = my_parser}
 };
 ```
 
-### Use Cases
+### `CCX_DLC_ANY` value
 
-1. **Higher-level protocols**: ISO-TP, J1939 where message DLC varies
-2. **Padding flexibility**: Accept messages with or without padding
-3. **Monitoring/debugging**: Capture all variants of a message ID
-4. **Protocol flexibility**: Handle different DLC configurations from various ECUs
+| Build | `CCX_DLC_ANY` | Matches |
+|-------|--------------|---------|
+| Classic (`CCX_ENABLE_CANFD=0`) | 15 | Any DLC 0-8 |
+| FD (`CCX_ENABLE_CANFD=1`) | 16 | Any DLC 0-15 (format filtered by `FDF`) |
 
-### Example
+The sentinel value is always one above the maximum valid DLC for the build, so it can never collide with a real frame length code.
+
+### Classic build wildcard
 
 ```c
 CCX_message_t msg1 = {.ID = 0x200, .DLC = 3, .Data = {1, 2, 3}};
@@ -941,12 +1084,45 @@ CCX_RX_PushMsg(&can, &msg1);  // Parser called (DLC=3 accepted)
 CCX_RX_PushMsg(&can, &msg2);  // Parser called (DLC=8 accepted)
 ```
 
+### FD build wildcard with frame-format filter
+
+In FD builds, `CCX_DLC_ANY` alone is not enough — you also control which frame format (classic vs FD) the wildcard matches via the `FDF` field:
+
+```c
+// Matches any FD frame on ID 0x300 (DLC 0-15, FDF=1)
+CCX_RX_table_t rx_table[] = {
+    {.ID = 0x300, .DLC = 0, .IDE_flag = 0, .Parser = fd_parser}
+};
+CCX_Init_Ex(&can, rx_table, NULL, 1, 0, send_fn, bus_fn, NULL,
+            CCX_FRAME_FORMAT_FD, 1);
+
+// FDF must be set AFTER Init (Init zeroes it)
+rx_table[0].DLC = CCX_DLC_ANY;
+rx_table[0].FDF = 1;             // Match FD frames only
+```
+
+```c
+// Matches any classic frame on ID 0x400
+rx_table[0].DLC = CCX_DLC_ANY;
+rx_table[0].FDF = 0;             // Match classic frames only (default after Init)
+```
+
+### Exact-DLC entries (backwards-compatible)
+
+Entries with `DLC != CCX_DLC_ANY` **never check `FDF`** — they match both classic and FD frames carrying that exact DLC. This means existing RX table definitions work unchanged in FD builds.
+
+### Use Cases
+
+1. **Higher-level protocols**: ISO-TP, J1939 where message DLC varies
+2. **Padding flexibility**: Accept messages with or without padding
+3. **Monitoring/debugging**: Capture all variants of a message ID
+4. **FD protocol bridges**: Separate wildcards for FD vs classic traffic on the same ID
+
 ### Important Notes
 
-- **Only `CCX_DLC_ANY` (value 15) works as wildcard**
-- DLC values 0-8 require exact match as usual
-- DLC values 9-14 are invalid and will be rejected
 - ISO-TP macros automatically use `CCX_DLC_ANY` for flexibility
+- In FD builds, DLC values 0-15 are all valid; only 16 is the wildcard sentinel
+- `FDF` is always zeroed by `CCX_Init`/`CCX_Init_Ex` — set it after Init
 
 
 ---
@@ -1273,10 +1449,11 @@ void can_task(void *param) {
 
 ## Limitations
 
-1. **Buffer Size**: Fixed at compile time (CCX_RX_BUFFER_SIZE, CCX_TX_BUFFER_SIZE)
-2. **DLC Range**: 0-8 only (CAN 2.0 standard)
-3. **Timeout Range**: Limited by CCX_TIME_t type (default: uint32_t)
-4. **Not Thread-Safe**: Requires external synchronization in multi-threaded environments
+1. **Buffer Size**: Fixed at compile time (`CCX_RX_BUFFER_SIZE`, `CCX_TX_BUFFER_SIZE`)
+2. **DLC Range**: 0-8 in classic builds (CAN 2.0); 0-15 in FD builds (`-DCCX_ENABLE_CANFD=1`)
+3. **ISO-TP on FD instances**: Not supported in v2.0 — `CCX_ISOTP_Transmit` returns `CCX_ISOTP_ERROR_FD_NOT_SUPPORTED` on FD-format instances (planned for v2.1)
+4. **Timeout Range**: Limited by `CCX_TIME_t` type (default: `uint32_t`)
+5. **Not Thread-Safe**: Requires external synchronization in multi-threaded environments
 
 
 ---
@@ -1292,7 +1469,28 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v1.4.4 (2026-04-01)
+### Current Release: v2.0.0 (2026-04-17)
+- **CAN FD Support** (`-DCCX_ENABLE_CANFD=1`): 64-byte payloads, BRS, ESI — zero overhead when disabled
+  - `CCX_message_t` extended: `Data[64]`, `FDF`, `BRS`, `ESI` bitfields (FD build only)
+  - `CCX_RX_table_t` extended: 5-bit `DLC` field (sentinel `CCX_DLC_ANY=16`), `FDF` wildcard filter
+  - `CCX_TX_table_t` extended: `FDF`, `BRS` per-entry flags; clamped to instance `FrameFormat`
+  - `CCX_frame_format_t` enum: `CCX_FRAME_FORMAT_CLASSIC` / `CCX_FRAME_FORMAT_FD`
+  - `CCX_Init_Ex()`: extended init with `FrameFormat` and `BRS_Default` parameters
+  - `CCX_FD_DLC_t` enum: named constants `CCX_FD_DLC_0B` … `CCX_FD_DLC_64B`
+  - `CCX_FD_LenToDLC()` / `CCX_MsgPayloadLen()`: helpers for FD length ↔ DLC conversion
+  - `CCX_FD_DLC_TO_LEN[16]` LUT: compile-time array mapping DLC codes to byte lengths
+  - `CCX_Init` zeroes `FDF` in all RX table entries (prevents stack-garbage breaking classic entries)
+  - Classic-format instances reject `FDF=1` push attempts (`CCX_WRONG_ARG`)
+- **Wildcard DLC redesign**: `CCX_DLC_ANY` = 16 in FD builds (max valid FD DLC + 1); 5-bit `DLC` field in `CCX_RX_table_t` eliminates the need for a separate `MatchAnyLen` flag
+  - Exact-DLC entries still never check `FDF` — backwards-compatible with all v1.x RX table definitions
+  - `FDF` on a `CCX_DLC_ANY` entry selects which frame format the wildcard matches (0=classic, 1=FD)
+- **Network layer** (`can_corex_net`): FD→classic drop guard; `dropped_mixed` stat counter
+- **ISO-TP** (`can_corex_isotp`): returns `CCX_ISOTP_ERROR_FD_NOT_SUPPORTED` on FD-format instances; full FD support planned for v2.1
+- **Test suite**: 39 new CAN FD tests; 6 build flavors (classic linear/binary/hash + FD linear/binary/hash)
+  - Classic: 275/275/279 tests passing; FD: 314/314/318 tests passing
+- **Breaking Changes**: None for classic (`CCX_ENABLE_CANFD=0`) builds — fully backward compatible with v1.4.x
+
+### v1.4.4 (2026-04-01)
 - **Bug Fixes**:
   - **ISO-TP N_Cs timeout logic (CRITICAL)**: Fixed N_Cs timeout check incorrectly nested inside STmin condition
     - When `STmin > N_Cs`, the timeout never fired — CF was sent before N_Cs could trigger
