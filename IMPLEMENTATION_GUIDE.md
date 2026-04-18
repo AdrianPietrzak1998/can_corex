@@ -1442,7 +1442,7 @@ static void FDCAN1_send_message(const CCX_instance_t *Instance,
     }
     
     TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-    TxHeader.DataLength = msg->DLC << 16;  /* DLC in upper 16 bits */
+    TxHeader.DataLength = (uint32_t)msg->DLC;
     TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
     TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
     TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
@@ -1469,7 +1469,7 @@ static void FDCAN2_send_message(const CCX_instance_t *Instance,
     }
     
     TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-    TxHeader.DataLength = msg->DLC << 16;
+    TxHeader.DataLength = (uint32_t)msg->DLC;
     TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
     TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
     TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
@@ -1526,7 +1526,7 @@ static void FDCAN_send_message_shared(const CCX_instance_t *Instance,
     }
     
     TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-    TxHeader.DataLength = msg->DLC << 16;
+    TxHeader.DataLength = (uint32_t)msg->DLC;
     TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
     TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
     TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
@@ -1670,7 +1670,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
                 
                 msg.ID = RxHeader.Identifier;
                 msg.IDE_flag = (RxHeader.IdType == FDCAN_EXTENDED_ID) ? 1 : 0;
-                msg.DLC = (RxHeader.DataLength >> 16) & 0x0F;
+                msg.DLC = RxHeader.DataLength & 0x0FU;
                 
                 for (uint8_t i = 0; i < msg.DLC; i++) {
                     msg.Data[i] = RxData[i];
@@ -1698,7 +1698,7 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
                 
                 msg.ID = RxHeader.Identifier;
                 msg.IDE_flag = (RxHeader.IdType == FDCAN_EXTENDED_ID) ? 1 : 0;
-                msg.DLC = (RxHeader.DataLength >> 16) & 0x0F;
+                msg.DLC = RxHeader.DataLength & 0x0FU;
                 
                 for (uint8_t i = 0; i < msg.DLC; i++) {
                     msg.Data[i] = RxData[i];
@@ -2008,13 +2008,14 @@ Both the library and the FDCAN HAL use the same raw DLC field (0–15). The conv
 formula is identical for classic and FD frames:
 
 ```c
-TxHeader.DataLength = (uint32_t)msg->DLC << 16;
-// DLC 0..8  → FDCAN_DLC_BYTES_0..FDCAN_DLC_BYTES_8
-// DLC 9     → FDCAN_DLC_BYTES_12 (12 bytes)
-// DLC 15    → FDCAN_DLC_BYTES_64 (64 bytes)
+// TX: CCX DLC (0–15) == FDCAN_DLC_BYTES_* (0x00–0x0F) — wartości identyczne, bezpośrednie przypisanie
+TxHeader.DataLength = (uint32_t)msg->DLC;
+// DLC 0..8  → FDCAN_DLC_BYTES_0..FDCAN_DLC_BYTES_8  (0x00..0x08)
+// DLC 9     → FDCAN_DLC_BYTES_12 (12 bytes)          (0x09)
+// DLC 15    → FDCAN_DLC_BYTES_64 (64 bytes)           (0x0F)
 
 // RX decode:
-msg.DLC = (RxHeader.DataLength >> 16) & 0x0FU;
+msg.DLC = RxHeader.DataLength & 0x0FU;
 ```
 
 Use `CCX_FD_DLC_TO_LEN[msg->DLC]` to get the actual byte count when copying payload data.
@@ -2098,8 +2099,8 @@ static void FDCAN1_send_fd(const CCX_instance_t *Instance, const CCX_message_t *
     TxHeader.Identifier    = msg->ID;
     TxHeader.IdType        = msg->IDE_flag ? FDCAN_EXTENDED_ID : FDCAN_STANDARD_ID;
     TxHeader.TxFrameType   = FDCAN_DATA_FRAME;
-    /* (uint32_t)DLC << 16 maps 0-15 to FDCAN_DLC_BYTES_0..FDCAN_DLC_BYTES_64 */
-    TxHeader.DataLength    = (uint32_t)msg->DLC << 16;
+    /* CCX DLC 0-15 == FDCAN_DLC_BYTES_* 0x00-0x0F — direct assignment, no shift */
+    TxHeader.DataLength    = (uint32_t)msg->DLC;
     TxHeader.FDFormat      = msg->FDF ? FDCAN_FD_CAN    : FDCAN_CLASSIC_CAN;
     TxHeader.BitRateSwitch = msg->BRS ? FDCAN_BRS_ON    : FDCAN_BRS_OFF;
     TxHeader.ErrorStateIndicator  = FDCAN_ESI_ACTIVE;
@@ -2118,7 +2119,7 @@ static void FDCAN2_send_fd(const CCX_instance_t *Instance, const CCX_message_t *
     TxHeader.Identifier           = msg->ID;
     TxHeader.IdType               = msg->IDE_flag ? FDCAN_EXTENDED_ID : FDCAN_STANDARD_ID;
     TxHeader.TxFrameType          = FDCAN_DATA_FRAME;
-    TxHeader.DataLength           = (uint32_t)msg->DLC << 16;
+    TxHeader.DataLength           = (uint32_t)msg->DLC;
     TxHeader.FDFormat             = msg->FDF ? FDCAN_FD_CAN    : FDCAN_CLASSIC_CAN;
     TxHeader.BitRateSwitch        = msg->BRS ? FDCAN_BRS_ON    : FDCAN_BRS_OFF;
     TxHeader.ErrorStateIndicator  = FDCAN_ESI_ACTIVE;
@@ -2227,7 +2228,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
         msg.ID       = RxHeader.Identifier;
         msg.IDE_flag = (RxHeader.IdType == FDCAN_EXTENDED_ID) ? 1 : 0;
-        msg.DLC      = (RxHeader.DataLength >> 16) & 0x0FU;
+        msg.DLC      = RxHeader.DataLength & 0x0FU;
         msg.FDF      = (RxHeader.FDFormat         == FDCAN_FD_CAN)     ? 1 : 0;
         msg.BRS      = (RxHeader.BitRateSwitch     == FDCAN_BRS_ON)     ? 1 : 0;
         msg.ESI      = (RxHeader.ErrorStateIndicator == FDCAN_ESI_PASSIVE) ? 1 : 0;
@@ -2256,7 +2257,7 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
 
         msg.ID       = RxHeader.Identifier;
         msg.IDE_flag = (RxHeader.IdType == FDCAN_EXTENDED_ID) ? 1 : 0;
-        msg.DLC      = (RxHeader.DataLength >> 16) & 0x0FU;
+        msg.DLC      = RxHeader.DataLength & 0x0FU;
         msg.FDF      = (RxHeader.FDFormat         == FDCAN_FD_CAN)      ? 1 : 0;
         msg.BRS      = (RxHeader.BitRateSwitch     == FDCAN_BRS_ON)      ? 1 : 0;
         msg.ESI      = (RxHeader.ErrorStateIndicator == FDCAN_ESI_PASSIVE) ? 1 : 0;

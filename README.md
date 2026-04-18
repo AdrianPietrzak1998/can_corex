@@ -221,8 +221,7 @@ CCX_Status_t status = CCX_Init(
     5, 3,
     my_send_function,
     my_bus_check,
-    my_timeout_callback,
-    NULL
+    NULL  /* ParserUnregMsg — optional unregistered message handler */
 );
 ```
 
@@ -539,11 +538,13 @@ typedef struct {
     uint32_t ID;          // Expected message ID
     uint8_t DLC : 4;      // Expected DLC (0-8); CCX_DLC_ANY (15) = accept any
     uint8_t IDE_flag : 1; // Expected ID type
+    void *UserData;       // User context pointer passed to Parser and TimeoutCallback
     CCX_TIME_t TimeOut;   // Timeout period (0 = disabled)
     void (*Parser)(const CCX_instance_t *Instance,
                    CCX_message_t *Msg,
-                   uint16_t Slot);
-    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot);
+                   uint16_t Slot,
+                   void *UserData);
+    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot, void *UserData);
     CCX_TIME_t LastTick;  // Last receive time (auto-managed)
 } CCX_RX_table_t;
 ```
@@ -557,11 +558,13 @@ typedef struct {
     uint8_t FDF : 1;      // Frame format filter (only checked when DLC == CCX_DLC_ANY)
                           //   0 = wildcard matches classic frames
                           //   1 = wildcard matches FD frames
+    void *UserData;       // User context pointer passed to Parser and TimeoutCallback
     CCX_TIME_t TimeOut;   // Timeout period (0 = disabled)
     void (*Parser)(const CCX_instance_t *Instance,
                    CCX_message_t *Msg,
-                   uint16_t Slot);
-    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot);
+                   uint16_t Slot,
+                   void *UserData);
+    void (*TimeoutCallback)(CCX_instance_t *Instance, uint16_t Slot, void *UserData);
     CCX_TIME_t LastTick;  // Last receive time (auto-managed)
 } CCX_RX_table_t;
 ```
@@ -586,10 +589,12 @@ typedef struct {
     uint8_t *Data;        // Pointer to data buffer
     uint8_t DLC : 4;      // Data length (0-8)
     uint8_t IDE_flag : 1; // ID type
+    void *UserData;       // User context pointer passed to Parser
     CCX_TIME_t SendFreq;  // Send period in ticks
     void (*Parser)(const CCX_instance_t *Instance,
                    uint8_t *DataToSend,
-                   uint16_t Slot);
+                   uint16_t Slot,
+                   void *UserData);
     CCX_TIME_t LastTick;  // Last send time (auto-managed)
 } CCX_TX_table_t;
 ```
@@ -603,10 +608,12 @@ typedef struct {
     uint8_t IDE_flag : 1; // ID type
     uint8_t FDF : 1;      // 1 = send as FD frame (clamped to instance FrameFormat)
     uint8_t BRS : 1;      // Bit-Rate Switch (overrides BRS_Default from CCX_Init_Ex)
+    void *UserData;       // User context pointer passed to Parser
     CCX_TIME_t SendFreq;  // Send period in ticks
     void (*Parser)(const CCX_instance_t *Instance,
                    uint8_t *DataToSend,
-                   uint16_t Slot);
+                   uint16_t Slot,
+                   void *UserData);
     CCX_TIME_t LastTick;  // Last send time (auto-managed)
 } CCX_TX_table_t;
 ```
