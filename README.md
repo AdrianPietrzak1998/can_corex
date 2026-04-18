@@ -4,7 +4,7 @@
 [![Version](https://img.shields.io/badge/Version-2.0.0-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-275--279%20classic%20%7C%20321--325%20FD%20passing-success.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-275--279%20classic%20%7C%20322--326%20FD%20passing-success.svg)]()
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
 
@@ -1438,8 +1438,8 @@ Mozilla Public License 2.0 - see LICENSE file for details.
   - `CCX_FD_DLC_TO_LEN[16]` LUT: compile-time array mapping DLC codes to byte lengths
 - **Network layer** (`can_corex_net`): no FD-to-classic frame filtering — FD frames replicate freely; `dropped_mixed` stat removed
 - **ISO-TP** (`can_corex_isotp`): classic ISO-TP on FD instances **fully supported** (ISO 15765-2 compliant); `FrameFormat` field in `CCX_ISOTP_TX_Config_t` / `CCX_ISOTP_RX_Config_t`; FD payload returns `CCX_ISOTP_ERROR_FD_NOT_SUPPORTED` (planned for v2.1)
-- **Test suite**: 46 CAN FD tests; 6 build flavors (classic linear/binary/hash + FD linear/binary/hash)
-  - Classic: 275/275/279 tests passing; FD: 321/321/325 tests passing
+- **Test suite**: 47 CAN FD tests; 6 build flavors (classic linear/binary/hash + FD linear/binary/hash)
+  - Classic: 275/275/279 tests passing; FD: 322/322/326 tests passing
 - **Breaking Changes** (FD builds only): `FDF`/`BRS` fields replaced by `FrameFormat`; `CCX_Init_Ex` removed; all RX entries now enforce FrameFormat matching
 - **No breaking changes** for classic (`CCX_ENABLE_CANFD=0`) builds — fully backward compatible with v1.4.x
 

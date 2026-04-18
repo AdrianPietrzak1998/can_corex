@@ -171,6 +171,7 @@ static inline CCX_MsgRegStatus_t CCX_RX_ProcessMatch(CCX_instance_t *Instance, C
 {
     uint8_t dlc_match = 0;
 #if CCX_ENABLE_CANFD
+    /* FD and FD_BRS both count as "FD" for format matching — entry FD matches any FD frame */
     uint8_t entry_is_fd = (Instance->CCX_RX_table[index].FrameFormat != CCX_FRAME_FORMAT_CLASSIC);
     uint8_t msg_is_fd   = (Msg->FrameFormat != CCX_FRAME_FORMAT_CLASSIC);
     uint8_t format_match = (entry_is_fd == msg_is_fd);

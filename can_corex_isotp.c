@@ -457,6 +457,13 @@ CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_R
         return CCX_ISOTP_ERROR_INVALID_ARG;
     }
 
+#if CCX_ENABLE_CANFD
+    if (Config->FrameFormat != CCX_FRAME_FORMAT_CLASSIC)
+    {
+        return CCX_ISOTP_ERROR_FD_NOT_SUPPORTED;
+    }
+#endif
+
     memcpy(&Instance->Config, Config, sizeof(CCX_ISOTP_RX_Config_t));
     Instance->State = CCX_ISOTP_RX_STATE_IDLE;
     Instance->RxDataLength = 0;
