@@ -45,7 +45,7 @@
  * @brief Enables CAN FD support (64-byte payload, BRS, ESI, FDF).
  *
  * When 0 (default): zero RAM/code overhead, ABI identical to v1.x.
- * When 1: CCX_message_t grows to 64-byte payload; CCX_Init_Ex() available.
+ * When 1: CCX_message_t grows to 64-byte payload; CCX_frame_format_t and CCX_ide_t enums available.
  */
 #ifndef CCX_ENABLE_CANFD
 #define CCX_ENABLE_CANFD 0
@@ -59,16 +59,14 @@
  * In classic builds (CCX_ENABLE_CANFD=0) the sentinel is 15 (fits in 4-bit DLC field,
  * classic frames are DLC 0-8).
  * In FD builds (CCX_ENABLE_CANFD=1) the sentinel is 16 (max valid FD DLC is 15,
- * stored in the 5-bit DLC field).  FDF in the table entry still controls which
- * frame format is matched: FDF=0 → classic wildcard, FDF=1 → FD wildcard.
+ * stored in the 5-bit DLC field).  FrameFormat in the table entry controls which
+ * frame format is matched: CLASSIC → classic wildcard, FD/FD_BRS → FD wildcard.
  *
  * Example (FD build):
  * CCX_RX_table_t rx_table[] = {
- *     {.ID = 0x100, .DLC = 8,          .Parser = exact_parser}, // Exact match: DLC=8 only
- *     {.ID = 0x200, .DLC = CCX_DLC_ANY, .Parser = any_parser}   // Any classic DLC (FDF=0 after Init)
+ *     {.ID = 0x100, .DLC = 8,           .FrameFormat = CCX_FRAME_FORMAT_CLASSIC, .Parser = exact_parser},
+ *     {.ID = 0x200, .DLC = CCX_DLC_ANY, .FrameFormat = CCX_FRAME_FORMAT_FD,      .Parser = fd_any_parser},
  * };
- * // After CCX_Init: set FDF=1 for FD wildcard
- * rx_table[1].FDF = 1;   // now matches any FD DLC
  */
 #if CCX_ENABLE_CANFD
 #define CCX_DLC_ANY 16
@@ -128,7 +126,7 @@
 
 #define CCX_MAX_TIMEOUT UINT32_MAX
 typedef volatile uint32_t CCX_TIME_t;
-typedef uint32_t CCX_TIME_VALUE_t;  /* Non-volatile variant for values (not references) */
+typedef uint32_t CCX_TIME_VALUE_t; /* Non-volatile variant for values (not references) */
 
 #else
 
@@ -199,6 +197,37 @@ typedef enum
     CCX_BUS_STATE_PASSIVE,
     CCX_BUS_STATE_OFF
 } CCX_BusState_t;
+
+/**
+ * @brief CAN identifier type (standard 11-bit or extended 29-bit)
+ */
+typedef enum
+{
+    CCX_ID_STANDARD = 0, /**< Standard 11-bit identifier */
+    CCX_ID_EXTENDED = 1, /**< Extended 29-bit identifier */
+} CCX_ide_t;
+
+#if CCX_ENABLE_CANFD
+/**
+ * @brief CAN frame format selection
+ *
+ * Used in message, RX table, and TX table entries to specify the frame format.
+ * A single 2-bit field replaces the separate FDF and BRS bitfields from v1.x.
+ *
+ * For RX table entries:
+ *   - CCX_FRAME_FORMAT_CLASSIC: entry matches only classic (non-FD) frames
+ *   - CCX_FRAME_FORMAT_FD / CCX_FRAME_FORMAT_FD_BRS: entry matches only FD frames
+ *
+ * For TX table / message entries:
+ *   - Controls the frame format transmitted on the bus
+ */
+typedef enum
+{
+    CCX_FRAME_FORMAT_CLASSIC = 0, /**< Classic CAN 2.0, max 8-byte payload */
+    CCX_FRAME_FORMAT_FD = 1,      /**< CAN FD without bit-rate switch (BRS=0) */
+    CCX_FRAME_FORMAT_FD_BRS = 2,  /**< CAN FD with bit-rate switch (BRS=1) */
+} CCX_frame_format_t;
+#endif
 
 /**
  * @brief CAN error counters from hardware controller
@@ -272,27 +301,18 @@ typedef struct
     uint32_t ID;
 #if CCX_ENABLE_CANFD
     uint8_t Data[64];
-    uint8_t DLC : 4;
-    uint8_t IDE_flag : 1;
-    uint8_t FDF : 1; /* 0 = classic frame, 1 = CAN FD frame */
-    uint8_t BRS : 1; /* bit-rate switch (meaningful only when FDF=1) */
-    uint8_t ESI : 1; /* error state indicator (from RX hardware) */
 #else
     uint8_t Data[8];
+#endif
     uint8_t DLC : 4;
-    uint8_t IDE_flag : 1;
+    uint8_t IDE_flag : 1; /* use CCX_ide_t values */
+#if CCX_ENABLE_CANFD
+    uint8_t FrameFormat : 2; /* use CCX_frame_format_t values */
+    uint8_t ESI : 1;         /* error state indicator (set by RX hardware) */
 #endif
 } CCX_message_t;
 
 typedef struct CCX_instance_t CCX_instance_t;
-
-#if CCX_ENABLE_CANFD
-typedef enum
-{
-    CCX_FRAME_FORMAT_CLASSIC = 0, /* Classic CAN 2.0, max 8-byte payload */
-    CCX_FRAME_FORMAT_FD      = 1, /* CAN FD, up to 64-byte payload */
-} CCX_frame_format_t;
-#endif
 
 /**
  * @brief Bus monitoring statistics
@@ -414,12 +434,12 @@ typedef struct
 {
     uint32_t ID;
 #if CCX_ENABLE_CANFD
-    uint8_t DLC : 5;   /* 0-15 = exact FD DLC; 16 (CCX_DLC_ANY) = wildcard — FDF controls format */
-    uint8_t IDE_flag : 1;
-    uint8_t FDF : 1;   /* 0 = match classic frames, 1 = match FD frames (checked when DLC==CCX_DLC_ANY) */
+    uint8_t DLC : 5;         /* 0-15 = exact FD DLC; 16 (CCX_DLC_ANY) = wildcard */
+    uint8_t IDE_flag : 1;    /* use CCX_ide_t values */
+    uint8_t FrameFormat : 2; /* CLASSIC→match classic frames; FD/FD_BRS→match FD frames */
 #else
     uint8_t DLC : 4;
-    uint8_t IDE_flag : 1;
+    uint8_t IDE_flag : 1; /* use CCX_ide_t values */
 #endif
     void *UserData;
     CCX_TIME_t TimeOut;
@@ -470,10 +490,9 @@ typedef struct
     uint32_t ID;
     uint8_t *Data;
     uint8_t DLC : 4;
-    uint8_t IDE_flag : 1;
+    uint8_t IDE_flag : 1; /* use CCX_ide_t values */
 #if CCX_ENABLE_CANFD
-    uint8_t FDF : 1; /* 0 = classic, 1 = FD */
-    uint8_t BRS : 1; /* bit-rate switch (valid when FDF=1) */
+    uint8_t FrameFormat : 2; /* use CCX_frame_format_t values */
 #endif
     void *UserData;
     CCX_TIME_t SendFreq;
@@ -506,11 +525,6 @@ struct CCX_instance_t
 
 #if defined(CCX_RX_SEARCH_HASH)
     uint16_t RxHashTable[CCX_RX_HASH_SIZE]; /**< Hash table for fast RX message lookup */
-#endif
-
-#if CCX_ENABLE_CANFD
-    CCX_frame_format_t FrameFormat; /**< Classic or FD mode for this instance */
-    uint8_t            BRS_Default; /**< Default BRS flag for periodic FD TX messages */
 #endif
 };
 
@@ -704,15 +718,15 @@ void CCX_RX_RebuildHash(CCX_instance_t *Instance);
  */
 typedef enum
 {
-    CCX_FD_DLC_0B  = 0,  /* 0 bytes  */
-    CCX_FD_DLC_1B  = 1,  /* 1 byte   */
-    CCX_FD_DLC_2B  = 2,  /* 2 bytes  */
-    CCX_FD_DLC_3B  = 3,  /* 3 bytes  */
-    CCX_FD_DLC_4B  = 4,  /* 4 bytes  */
-    CCX_FD_DLC_5B  = 5,  /* 5 bytes  */
-    CCX_FD_DLC_6B  = 6,  /* 6 bytes  */
-    CCX_FD_DLC_7B  = 7,  /* 7 bytes  */
-    CCX_FD_DLC_8B  = 8,  /* 8 bytes  */
+    CCX_FD_DLC_0B = 0,   /* 0 bytes  */
+    CCX_FD_DLC_1B = 1,   /* 1 byte   */
+    CCX_FD_DLC_2B = 2,   /* 2 bytes  */
+    CCX_FD_DLC_3B = 3,   /* 3 bytes  */
+    CCX_FD_DLC_4B = 4,   /* 4 bytes  */
+    CCX_FD_DLC_5B = 5,   /* 5 bytes  */
+    CCX_FD_DLC_6B = 6,   /* 6 bytes  */
+    CCX_FD_DLC_7B = 7,   /* 7 bytes  */
+    CCX_FD_DLC_8B = 8,   /* 8 bytes  */
     CCX_FD_DLC_12B = 9,  /* 12 bytes */
     CCX_FD_DLC_16B = 10, /* 16 bytes */
     CCX_FD_DLC_20B = 11, /* 20 bytes */
@@ -746,26 +760,8 @@ uint8_t CCX_FD_LenToDLC(uint8_t len);
  */
 static inline uint8_t CCX_MsgPayloadLen(const CCX_message_t *msg)
 {
-    return msg->FDF ? CCX_FD_DLC_TO_LEN[msg->DLC] : msg->DLC;
+    return (msg->FrameFormat != CCX_FRAME_FORMAT_CLASSIC) ? CCX_FD_DLC_TO_LEN[msg->DLC] : msg->DLC;
 }
-
-/**
- * @brief Initialize a CAN instance with explicit frame format selection
- *
- * Extended version of CCX_Init() that sets the per-instance CAN FD mode.
- * Classic instances reject messages with FDF=1 at the API boundary.
- *
- * @param Instance   CAN instance to initialize
- * @param format     CCX_FRAME_FORMAT_CLASSIC or CCX_FRAME_FORMAT_FD
- * @param brs_default Default BRS flag applied to periodic TX FD frames
- * @return CCX_OK on success, CCX_NULL_PTR on invalid arguments
- */
-CCX_Status_t CCX_Init_Ex(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CCX_TX_table_t *CCX_TX_table,
-                         uint16_t RxTableSize, uint16_t TxTableSize,
-                         void (*SendFunction)(const CCX_instance_t *Instance, const CCX_message_t *msg),
-                         CCX_BusIsFree_t (*BusCheck)(const CCX_instance_t *Instance),
-                         void (*ParserUnregMsg)(const CCX_instance_t *Instance, CCX_message_t *Msg),
-                         CCX_frame_format_t format, uint8_t brs_default);
 
 #endif /* CCX_ENABLE_CANFD */
 

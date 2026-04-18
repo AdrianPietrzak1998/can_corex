@@ -123,8 +123,11 @@ typedef struct
     CCX_instance_t *CanInstance; /* Pointer to CAN CoreX instance */
     uint32_t TxID;               /* CAN ID for transmitting data */
     uint32_t RxID_FC;            /* CAN ID for receiving Flow Control frames */
-    uint8_t IDE_TxID : 1;        /* 0 = Standard ID (11-bit), 1 = Extended ID (29-bit) for TxID */
-    uint8_t IDE_RxID_FC : 1;     /* 0 = Standard ID (11-bit), 1 = Extended ID (29-bit) for RxID_FC */
+    uint8_t IDE_TxID : 1;    /* use CCX_ide_t values: CCX_ID_STANDARD / CCX_ID_EXTENDED */
+    uint8_t IDE_RxID_FC : 1; /* use CCX_ide_t values: CCX_ID_STANDARD / CCX_ID_EXTENDED */
+#if CCX_ENABLE_CANFD
+    CCX_frame_format_t FrameFormat : 2; /* Frame format for ISO-TP frames; FD payload not yet supported (v2.1) */
+#endif
     uint8_t BS;                  /* Block Size: number of CF before expecting FC (0 = no limit) */
     uint8_t STmin;               /* Separation Time minimum (0-127ms or 0xF1-0xF9 for 100-900us) */
     CCX_TIME_t N_As;             /* Timeout for TX of SF/FF/CF (default: 1000ms) */
@@ -172,8 +175,11 @@ typedef struct
     CCX_instance_t *CanInstance; /* Pointer to CAN CoreX instance */
     uint32_t RxID;               /* CAN ID for receiving data */
     uint32_t TxID;               /* CAN ID for transmitting Flow Control */
-    uint8_t IDE_RxID : 1;        /* 0 = Standard ID (11-bit), 1 = Extended ID (29-bit) for RxID */
-    uint8_t IDE_TxID : 1;        /* 0 = Standard ID (11-bit), 1 = Extended ID (29-bit) for TxID */
+    uint8_t IDE_RxID : 1;    /* use CCX_ide_t values: CCX_ID_STANDARD / CCX_ID_EXTENDED */
+    uint8_t IDE_TxID : 1;    /* use CCX_ide_t values: CCX_ID_STANDARD / CCX_ID_EXTENDED */
+#if CCX_ENABLE_CANFD
+    CCX_frame_format_t FrameFormat : 2; /* Frame format for ISO-TP frames; FD payload not yet supported (v2.1) */
+#endif
     uint8_t BS;                  /* Block Size to request in FC (0 = no limit) */
     uint8_t STmin;               /* Separation Time minimum to request in FC */
     CCX_TIME_t N_Ar;             /* Timeout for RX of SF/FF/CF (default: 1000ms) */

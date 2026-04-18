@@ -142,12 +142,19 @@ static inline CCX_TIME_VALUE_t ISOTP_ConvertSTminToMs(uint8_t stmin_raw)
  * @param Padding Padding configuration (enable/disable and padding byte)
  */
 static inline void ISOTP_SendCANMessage(CCX_instance_t *CanInstance, uint32_t ID, uint8_t IDE_flag, const uint8_t *Data,
-                                        uint8_t DLC, const CCX_ISOTP_Padding_t *Padding)
+                                        uint8_t DLC, const CCX_ISOTP_Padding_t *Padding
+#if CCX_ENABLE_CANFD
+                                        , CCX_frame_format_t frame_format
+#endif
+)
 {
     CCX_message_t msg = {0};
     msg.ID = ID;
     msg.IDE_flag = IDE_flag;
     msg.DLC = DLC;
+#if CCX_ENABLE_CANFD
+    msg.FrameFormat = frame_format;
+#endif
     memcpy(msg.Data, Data, DLC);
 
     /* Apply padding if enabled */
@@ -201,10 +208,9 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
     }
 
 #if CCX_ENABLE_CANFD
-    if (Instance->Config.CanInstance != NULL &&
-        Instance->Config.CanInstance->FrameFormat == CCX_FRAME_FORMAT_FD)
+    if (Instance->Config.FrameFormat != CCX_FRAME_FORMAT_CLASSIC)
     {
-        return CCX_ISOTP_ERROR_FD_NOT_SUPPORTED;
+        return CCX_ISOTP_ERROR_FD_NOT_SUPPORTED; /* FD payload ISO-TP planned for v2.1 */
     }
 #endif
 
@@ -233,7 +239,11 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
         memcpy(&frame[1], Data, Length);
 
         ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
-                             (uint8_t)(1 + Length), &Instance->Config.Padding);
+                             (uint8_t)(1 + Length), &Instance->Config.Padding
+#if CCX_ENABLE_CANFD
+                             , Instance->Config.FrameFormat
+#endif
+        );
 
         /* SF completes immediately - no state machine or timeout needed */
         Instance->State = CCX_ISOTP_TX_STATE_IDLE;
@@ -252,7 +262,11 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
     memcpy(&frame[2], Data, ISOTP_FF_DATA_BYTES);
 
     ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame, 8,
-                         &Instance->Config.Padding);
+                         &Instance->Config.Padding
+#if CCX_ENABLE_CANFD
+                         , Instance->Config.FrameFormat
+#endif
+    );
 
     Instance->TxDataOffset = ISOTP_FF_DATA_BYTES;
     Instance->SequenceNumber = 1;
@@ -334,7 +348,11 @@ static inline void CCX_ISOTP_TX_SendConsecutiveFrame(CCX_ISOTP_TX_t *Instance)
     memcpy(&frame[1], &Instance->TxData[Instance->TxDataOffset], data_len);
 
     ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
-                         (uint8_t)(1 + data_len), &Instance->Config.Padding);
+                         (uint8_t)(1 + data_len), &Instance->Config.Padding
+#if CCX_ENABLE_CANFD
+                         , Instance->Config.FrameFormat
+#endif
+    );
 
     Instance->TxDataOffset += data_len;
     Instance->SequenceNumber = (Instance->SequenceNumber + 1) & 0x0F;
@@ -462,7 +480,11 @@ static inline void CCX_ISOTP_RX_SendFlowControl(CCX_ISOTP_RX_t *Instance, CCX_IS
 
     /* ISO 15765-2: FC frame is 3 bytes [PCI+FS, BS, STmin] */
     ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
-                         3, &Instance->Config.Padding);
+                         3, &Instance->Config.Padding
+#if CCX_ENABLE_CANFD
+                         , Instance->Config.FrameFormat
+#endif
+    );
 }
 
 static inline void CCX_ISOTP_RX_HandleSingleFrame(CCX_ISOTP_RX_t *Instance, const CCX_message_t *msg)

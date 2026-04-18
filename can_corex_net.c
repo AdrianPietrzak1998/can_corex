@@ -208,14 +208,6 @@ void CCX_net_push(const CCX_instance_t *Instance, const CCX_message_t *msg, uint
                 {
                     if ((Instance != net->NodeList[j].NodeInstance) && NULL != net->NodeList[j].NodeInstance)
                     {
-#if CCX_ENABLE_CANFD
-                        if (msg->FDF == 1 &&
-                            net->NodeList[j].NodeInstance->FrameFormat == CCX_FRAME_FORMAT_CLASSIC)
-                        {
-                            net->dropped_mixed++;
-                            continue; /* drop FD frame destined for classic node */
-                        }
-#endif
                         switch (net->NodeList[j].NodeSettings.Replication)
                         {
                         case CCX_NET_TX_REPLICATION:

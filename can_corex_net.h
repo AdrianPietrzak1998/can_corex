@@ -123,9 +123,6 @@ struct CCX_net_t
 {
     CCX_net_node_t NodeList[CCX_MAX_INSTANCE_IN_NETWORK]; /* Array of nodes in this network */
     CCX_net_t *next;                                      /* Next network in global linked list */
-#if CCX_ENABLE_CANFD
-    uint32_t dropped_mixed; /**< FD frames dropped when destination is a classic instance */
-#endif
 };
 
 /**

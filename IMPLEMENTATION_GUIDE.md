@@ -1974,8 +1974,8 @@ void CAN_App_Init(void)
 ## Platform: STM32 HAL — FDCAN (CAN FD mode, CCX\_ENABLE\_CANFD=1)
 
 Applies to STM32 MCUs with the FDCAN peripheral (G4, H7, U5…) with **CAN FD payload
-support enabled** — compile with `-DCCX_ENABLE_CANFD=1`. Uses `CCX_Init_Ex()` to select
-frame format per instance and translates FDF/BRS/ESI between the library and the HAL.
+support enabled** — compile with `-DCCX_ENABLE_CANFD=1`. Uses `CCX_Init()` and translates
+`FrameFormat`/ESI between the library and the HAL.
 
 ### Prerequisites
 
@@ -1995,12 +1995,12 @@ frame format per instance and translates FDF/BRS/ESI between the library and the
 
 | | Classic mode | FD mode |
 |---|---|---|
-| Init function | `CCX_Init` | `CCX_Init_Ex` with `CCX_FRAME_FORMAT_FD` |
+| Init function | `CCX_Init` | `CCX_Init` (same — no per-instance format) |
 | `CCX_message_t.Data` | `uint8_t[8]` | `uint8_t[64]` |
 | RX data buffer | `uint8_t RxData[8]` | `uint8_t RxData[64]` |
-| `TxHeader.FDFormat` | `FDCAN_CLASSIC_CAN` | `msg->FDF ? FDCAN_FD_CAN : FDCAN_CLASSIC_CAN` |
-| `TxHeader.BitRateSwitch` | `FDCAN_BRS_OFF` | `msg->BRS ? FDCAN_BRS_ON : FDCAN_BRS_OFF` |
-| RX table FD wildcards | `CCX_DLC_ANY` (=15) | `CCX_DLC_ANY` (=16) + `.FDF=1` after Init |
+| `TxHeader.FDFormat` | `FDCAN_CLASSIC_CAN` | `(msg->FrameFormat != CCX_FRAME_FORMAT_CLASSIC) ? FDCAN_FD_CAN : FDCAN_CLASSIC_CAN` |
+| `TxHeader.BitRateSwitch` | `FDCAN_BRS_OFF` | `(msg->FrameFormat == CCX_FRAME_FORMAT_FD_BRS) ? FDCAN_BRS_ON : FDCAN_BRS_OFF` |
+| RX table FD wildcards | `CCX_DLC_ANY` (=15) | `CCX_DLC_ANY` (=16) + `.FrameFormat = CCX_FRAME_FORMAT_FD` in initializer |
 
 #### DLC encoding
 
@@ -2051,22 +2051,22 @@ TX table entries use raw DLC values (0–15). Use `CCX_FD_DLC_t` named constants
 CAN_FD_SensorBurst_t CAN_SensorBurst;
 
 CCX_TX_table_t CAN1_tx_table[] = {
-    /* Classic frame — DLC 8, FDF/BRS default to 0 (classic) */
+    /* Classic frame — FrameFormat defaults to CCX_FRAME_FORMAT_CLASSIC=0 */
     {.ID = 0x200, .Data = CAN_MotorStatus.frame, .DLC = 8,
      .IDE_flag = 0, .SendFreq = 100},
-    /* FD frame — 64-byte payload, BRS=1 */
+    /* FD frame with BRS — 64-byte payload */
     {.ID = 0x210, .Data = CAN_SensorBurst.frame, .DLC = CCX_FD_DLC_64B,
-     .IDE_flag = 0, .FDF = 1, .BRS = 1, .SendFreq = 50},
+     .IDE_flag = 0, .FrameFormat = CCX_FRAME_FORMAT_FD_BRS, .SendFreq = 50},
 };
 
-/* RX table — FDF field must be set AFTER CCX_Init_Ex clears it */
+/* RX table — FrameFormat in aggregate initializer, no post-Init fixup needed */
 CCX_RX_table_t CAN1_rx_table[] = {
-    /* Classic exact-DLC entry — works unchanged */
-    {.ID = 0x100, .DLC = 8,           .IDE_flag = 0, .Parser = classic_parser,  .TimeOut = 1000},
-    /* FD exact-DLC: 64 bytes — FDF not checked for exact-DLC match */
-    {.ID = 0x300, .DLC = CCX_FD_DLC_64B, .IDE_flag = 0, .Parser = fd64_parser, .TimeOut = 0},
-    /* FD wildcard — CCX_DLC_ANY=16, FDF=1 set after Init */
-    {.ID = 0x400, .DLC = CCX_DLC_ANY, .IDE_flag = 0, .Parser = fd_any_parser,   .TimeOut = 0},
+    /* Classic exact-DLC entry */
+    {.ID = 0x100, .DLC = 8,              .FrameFormat = CCX_FRAME_FORMAT_CLASSIC, .IDE_flag = 0, .Parser = classic_parser,  .TimeOut = 1000},
+    /* FD exact-DLC: 64 bytes */
+    {.ID = 0x300, .DLC = CCX_FD_DLC_64B, .FrameFormat = CCX_FRAME_FORMAT_FD_BRS,  .IDE_flag = 0, .Parser = fd64_parser,     .TimeOut = 0},
+    /* FD wildcard — any DLC, FD frame format */
+    {.ID = 0x400, .DLC = CCX_DLC_ANY,    .FrameFormat = CCX_FRAME_FORMAT_FD,      .IDE_flag = 0, .Parser = fd_any_parser,   .TimeOut = 0},
 };
 ```
 
@@ -2101,8 +2101,8 @@ static void FDCAN1_send_fd(const CCX_instance_t *Instance, const CCX_message_t *
     TxHeader.TxFrameType   = FDCAN_DATA_FRAME;
     /* CCX DLC 0-15 == FDCAN_DLC_BYTES_* 0x00-0x0F — direct assignment, no shift */
     TxHeader.DataLength    = (uint32_t)msg->DLC;
-    TxHeader.FDFormat      = msg->FDF ? FDCAN_FD_CAN    : FDCAN_CLASSIC_CAN;
-    TxHeader.BitRateSwitch = msg->BRS ? FDCAN_BRS_ON    : FDCAN_BRS_OFF;
+    TxHeader.FDFormat      = (msg->FrameFormat != CCX_FRAME_FORMAT_CLASSIC) ? FDCAN_FD_CAN    : FDCAN_CLASSIC_CAN;
+    TxHeader.BitRateSwitch = (msg->FrameFormat == CCX_FRAME_FORMAT_FD_BRS)  ? FDCAN_BRS_ON    : FDCAN_BRS_OFF;
     TxHeader.ErrorStateIndicator  = FDCAN_ESI_ACTIVE;
     TxHeader.TxEventFifoControl   = FDCAN_NO_TX_EVENTS;
     TxHeader.MessageMarker        = 0;
@@ -2120,8 +2120,8 @@ static void FDCAN2_send_fd(const CCX_instance_t *Instance, const CCX_message_t *
     TxHeader.IdType               = msg->IDE_flag ? FDCAN_EXTENDED_ID : FDCAN_STANDARD_ID;
     TxHeader.TxFrameType          = FDCAN_DATA_FRAME;
     TxHeader.DataLength           = (uint32_t)msg->DLC;
-    TxHeader.FDFormat             = msg->FDF ? FDCAN_FD_CAN    : FDCAN_CLASSIC_CAN;
-    TxHeader.BitRateSwitch        = msg->BRS ? FDCAN_BRS_ON    : FDCAN_BRS_OFF;
+    TxHeader.FDFormat             = (msg->FrameFormat != CCX_FRAME_FORMAT_CLASSIC) ? FDCAN_FD_CAN    : FDCAN_CLASSIC_CAN;
+    TxHeader.BitRateSwitch        = (msg->FrameFormat == CCX_FRAME_FORMAT_FD_BRS)  ? FDCAN_BRS_ON    : FDCAN_BRS_OFF;
     TxHeader.ErrorStateIndicator  = FDCAN_ESI_ACTIVE;
     TxHeader.TxEventFifoControl   = FDCAN_NO_TX_EVENTS;
     TxHeader.MessageMarker        = 0;
@@ -2149,25 +2149,19 @@ void CAN_App_Init(void)
 {
     CCX_tick_variable_register(&system_tick_ms);
 
-    /* CCX_Init_Ex selects CAN FD frame format for this instance */
-    CCX_Init_Ex(&FDCAN1_fd_instance,
-                CAN1_rx_table, CAN1_tx_table,
-                CAN1_RX_END,   CAN1_TX_END,
-                FDCAN1_send_fd, FDCAN1_bus_check_fd,
-                CAN1_rx_unreg_parser,
-                CCX_FRAME_FORMAT_FD,
-                1);    /* BRS_Default = 1: periodic TX FD frames use bit-rate switch */
+    /* FrameFormat is per-message/per-entry — use CCX_Init for all instances */
+    CCX_Init(&FDCAN1_fd_instance,
+             CAN1_rx_table, CAN1_tx_table,
+             CAN1_RX_END,   CAN1_TX_END,
+             FDCAN1_send_fd, FDCAN1_bus_check_fd,
+             CAN1_rx_unreg_parser);
+    /* FrameFormat already set in RX/TX table aggregate initializers — no post-Init fixup needed */
 
-    /* Set FD-specific RX fields AFTER Init (CCX_Init_Ex zeroes FDF) */
-    CAN1_rx_table[2].FDF = 1;  /* wildcard CCX_DLC_ANY matches FD frames only */
-
-    CCX_Init_Ex(&FDCAN2_fd_instance,
-                CAN2_rx_table, CAN2_tx_table,
-                CAN2_RX_END,   CAN2_TX_END,
-                FDCAN2_send_fd, FDCAN2_bus_check_fd,
-                CAN2_rx_unreg_parser,
-                CCX_FRAME_FORMAT_FD,
-                1);
+    CCX_Init(&FDCAN2_fd_instance,
+             CAN2_rx_table, CAN2_tx_table,
+             CAN2_RX_END,   CAN2_TX_END,
+             FDCAN2_send_fd, FDCAN2_bus_check_fd,
+             CAN2_rx_unreg_parser);
 
     /* Configure FDCAN1 — accept all frames (std + ext) to FIFO0 */
     FDCAN_FilterTypeDef filter = {
@@ -2229,8 +2223,10 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
         msg.ID       = RxHeader.Identifier;
         msg.IDE_flag = (RxHeader.IdType == FDCAN_EXTENDED_ID) ? 1 : 0;
         msg.DLC      = RxHeader.DataLength & 0x0FU;
-        msg.FDF      = (RxHeader.FDFormat         == FDCAN_FD_CAN)     ? 1 : 0;
-        msg.BRS      = (RxHeader.BitRateSwitch     == FDCAN_BRS_ON)     ? 1 : 0;
+        if (RxHeader.FDFormat == FDCAN_FD_CAN)
+            msg.FrameFormat = (RxHeader.BitRateSwitch == FDCAN_BRS_ON) ? CCX_FRAME_FORMAT_FD_BRS : CCX_FRAME_FORMAT_FD;
+        else
+            msg.FrameFormat = CCX_FRAME_FORMAT_CLASSIC;
         msg.ESI      = (RxHeader.ErrorStateIndicator == FDCAN_ESI_PASSIVE) ? 1 : 0;
 
         uint8_t payloadLen = CCX_FD_DLC_TO_LEN[msg.DLC];
@@ -2258,8 +2254,10 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
         msg.ID       = RxHeader.Identifier;
         msg.IDE_flag = (RxHeader.IdType == FDCAN_EXTENDED_ID) ? 1 : 0;
         msg.DLC      = RxHeader.DataLength & 0x0FU;
-        msg.FDF      = (RxHeader.FDFormat         == FDCAN_FD_CAN)      ? 1 : 0;
-        msg.BRS      = (RxHeader.BitRateSwitch     == FDCAN_BRS_ON)      ? 1 : 0;
+        if (RxHeader.FDFormat == FDCAN_FD_CAN)
+            msg.FrameFormat = (RxHeader.BitRateSwitch == FDCAN_BRS_ON) ? CCX_FRAME_FORMAT_FD_BRS : CCX_FRAME_FORMAT_FD;
+        else
+            msg.FrameFormat = CCX_FRAME_FORMAT_CLASSIC;
         msg.ESI      = (RxHeader.ErrorStateIndicator == FDCAN_ESI_PASSIVE) ? 1 : 0;
 
         uint8_t payloadLen = CCX_FD_DLC_TO_LEN[msg.DLC];
@@ -2319,7 +2317,7 @@ static void FDCAN1_request_recovery_fd(const CCX_instance_t *Instance)
     HAL_FDCAN_Start(&hfdcan1);
 }
 
-/* Add to CAN_App_Init() after CCX_Init_Ex calls */
+/* Add to CAN_App_Init() after CCX_Init calls */
 static CCX_BusMonitor_t FDCAN1_fd_monitor;
 CCX_BusMonitor_Init(
     &FDCAN1_fd_instance, &FDCAN1_fd_monitor,
@@ -2753,8 +2751,7 @@ Applies to TI devices with a **Connectivity Manager (CM)** subsystem that includ
 | `ID` (extended) | `id & 0x1FFFFFFF` (bits [28:0]) |
 | `IDE_flag` | `xtd` (0=std, 1=ext) |
 | `DLC` | `dlc` (0–15) |
-| `FDF` | `fdf` (0=classic, 1=FD) |
-| `BRS` | `brs` (0=no switch, 1=switch) |
+| `FrameFormat` | `fdf` + `brs`: CLASSIC→fdf=0,brs=0; FD→fdf=1,brs=0; FD_BRS→fdf=1,brs=1 |
 | `ESI` | `esi` (0=active, 1=passive) |
 | `Data[64]` | `data[32]` (uint16\_t, `memcpy` compatible on little-endian CM) |
 
@@ -2805,13 +2802,13 @@ static void MCAN_send_message(const CCX_instance_t *Instance, const CCX_message_
     txElem.rtr = 0U;
     txElem.esi = 0U;   /* always Error Active when transmitting */
     txElem.dlc = msg->DLC;
-    txElem.fdf = msg->FDF;
-    txElem.brs = msg->BRS;
+    txElem.fdf = (msg->FrameFormat != CCX_FRAME_FORMAT_CLASSIC) ? 1U : 0U;
+    txElem.brs = (msg->FrameFormat == CCX_FRAME_FORMAT_FD_BRS)  ? 1U : 0U;
     txElem.efc = 0U;
     txElem.mm  = 0U;
 
     /* memcpy works on Cortex-M4 little-endian: byte N → low/high byte of data[N/2] */
-    uint8_t dataLen = msg->FDF ? CCX_FD_DLC_TO_LEN[msg->DLC] : msg->DLC;
+    uint8_t dataLen = (msg->FrameFormat != CCX_FRAME_FORMAT_CLASSIC) ? CCX_FD_DLC_TO_LEN[msg->DLC] : msg->DLC;
     memcpy(txElem.data, msg->Data, dataLen);
 
     MCAN_writeMsgRam(MCANA_BASE, MCAN_MEM_TYPE_BUF, MCAN_TX_BUF_IDX, &txElem);
@@ -2857,11 +2854,13 @@ __interrupt void MCAN_RX_ISR(void)
             }
 
             msg.DLC = (uint8_t)rxElem.dlc;
-            msg.FDF = (uint8_t)rxElem.fdf;
-            msg.BRS = (uint8_t)rxElem.brs;
+            if (rxElem.fdf)
+                msg.FrameFormat = rxElem.brs ? CCX_FRAME_FORMAT_FD_BRS : CCX_FRAME_FORMAT_FD;
+            else
+                msg.FrameFormat = CCX_FRAME_FORMAT_CLASSIC;
             msg.ESI = (uint8_t)rxElem.esi;
 
-            uint8_t dataLen = msg.FDF ? CCX_FD_DLC_TO_LEN[msg.DLC] : msg.DLC;
+            uint8_t dataLen = (msg.FrameFormat != CCX_FRAME_FORMAT_CLASSIC) ? CCX_FD_DLC_TO_LEN[msg.DLC] : msg.DLC;
             memcpy(msg.Data, rxElem.data, dataLen);
 
             CCX_RX_PushMsg(&MCAN_instance, &msg);
@@ -2961,16 +2960,12 @@ void CAN_App_Init(void)
     MCAN_setOpMode(MCANA_BASE, MCAN_OPERATION_MODE_NORMAL);
 
     /* ---- CAN CoreX instance init ---- */
-    CCX_Init_Ex(&MCAN_instance,
-                CAN1_rx_table, CAN1_tx_table,
-                CAN1_RX_END,   CAN1_TX_END,
-                MCAN_send_message, MCAN_bus_check,
-                CAN1_rx_unreg_parser,
-                CCX_FRAME_FORMAT_FD,
-                1);   /* BRS_Default = 1 */
-
-    /* Set FD-specific RX fields after Init */
-    CAN1_rx_table[2].FDF = 1;  /* FD wildcard entry */
+    CCX_Init(&MCAN_instance,
+             CAN1_rx_table, CAN1_tx_table,
+             CAN1_RX_END,   CAN1_TX_END,
+             MCAN_send_message, MCAN_bus_check,
+             CAN1_rx_unreg_parser);
+    /* FrameFormat set in RX/TX table aggregate initializers — no post-Init fixup needed */
 }
 
 void CAN_App_Process(void)
@@ -3056,7 +3051,7 @@ the value matching your nominal bit rate:
 #### Initialization
 
 ```c
-/* Add to CAN_App_Init() after CCX_Init_Ex */
+/* Add to CAN_App_Init() after CCX_Init */
 static CCX_BusMonitor_t MCAN_monitor;
 
 CCX_BusMonitor_Init(
@@ -3136,14 +3131,14 @@ This implementation guide covers:
 1. **Recommended file structure** for maintainable CAN applications
 2. **STM32 bxCAN** (F1/F2/F4): dual-instance, standard + extended IDs, shared/separate callbacks, bus monitoring. Note on ABOM hardware auto-recovery.
 3. **STM32 FDCAN — classic mode** (G4/H7/U5): FDCAN peripheral in CAN 2.0 mode, different register layout (PSR/ECR), FIFO-based RX.
-4. **STM32 FDCAN — FD mode** (`CCX_ENABLE_CANFD=1`): 64-byte payloads, FDF/BRS/ESI field mapping, `CCX_Init_Ex`, RX table FD wildcards (`CCX_DLC_ANY` + `.FDF=1` after Init), `CCX_FD_DLC_t` named constants.
+4. **STM32 FDCAN — FD mode** (`CCX_ENABLE_CANFD=1`): 64-byte payloads, `FrameFormat`/ESI field mapping, `CCX_Init` (same as classic), RX/TX table `FrameFormat` in aggregate initializer, `CCX_FD_DLC_t` named constants.
 5. **TI CM CAN 2.0** (F28P65x CANA/B): Connectivity Manager Cortex-M4, driverlib `CAN_*` API, message object TX/RX, bus monitoring via `CAN_O_ERR` register.
 6. **TI CM MCAN FD** (`CCX_ENABLE_CANFD=1`): MCAN peripheral on CM subsystem, `MCAN_TxBufElement`/`MCAN_RxBufElement` field mapping, ID bit-shift encoding, `memcpy`-compatible data transfer, bus monitoring via `MCAN_getProtocolStatus`.
 
 **Key takeaways:**
 - Enable required interrupts and configure message RAM / filters before starting the peripheral
-- Use `CCX_Init_Ex` with `CCX_FRAME_FORMAT_FD` for FD instances; `CCX_Init` for classic
-- Set `FDF` in RX table entries **after** `CCX_Init` / `CCX_Init_Ex` (Init zeroes it to prevent stack-garbage issues)
+- Use `CCX_Init` for all instances — frame format is per-message/per-entry via `CCX_frame_format_t`, not per-instance
+- Set `FrameFormat` in RX/TX table aggregate initializers (e.g. `.FrameFormat = CCX_FRAME_FORMAT_FD_BRS`); `CCX_FRAME_FORMAT_CLASSIC=0` is the C zero-init default; field-by-field tables require `memset(table, 0, sizeof(table))` before population
 - If hardware auto bus-off recovery is active (bxCAN ABOM, or custom platform feature), use `auto_recovery_enabled = 0` — let hardware recover, use the library only for monitoring
 - `CCX_FD_DLC_TO_LEN[dlc]` converts raw DLC 0–15 to actual byte count; `CCX_FD_LenToDLC(n)` does the reverse
 - Bus monitoring `recovery_delay` should be ≥ the ISO 11898-1 minimum for your nominal bit rate (see `CAN_COREX_BUS_OFF_RECOVERY_*_MS` macros)
