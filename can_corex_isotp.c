@@ -1231,6 +1231,9 @@ static inline void CCX_ISOTP_RX_HandleConsecutiveFrame(CCX_ISOTP_RX_t *Instance,
     }
 }
 
+/* cppcheck-suppress constParameterPointer
+ * Public parser signature must match CAN CoreX RX callback ABI (`CCX_message_t *Msg`).
+ */
 void CCX_ISOTP_RX_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Msg, uint16_t Slot, void *UserData)
 {
     CCX_ISOTP_RX_t *Instance = (CCX_ISOTP_RX_t *)UserData;
@@ -1293,6 +1296,9 @@ void CCX_ISOTP_RX_Poll(CCX_ISOTP_RX_t *Instance)
     }
 }
 
+/* cppcheck-suppress constParameterPointer
+ * Public parser signature must match CAN CoreX RX callback ABI (`CCX_message_t *Msg`).
+ */
 void CCX_ISOTP_TX_FC_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Msg, uint16_t Slot, void *UserData)
 {
     CCX_ISOTP_TX_t *Instance = (CCX_ISOTP_TX_t *)UserData;
