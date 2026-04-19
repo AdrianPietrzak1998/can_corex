@@ -256,6 +256,9 @@ typedef struct
  * }
  * @endcode
  *
+ * @note `OnReceiveStart` is called once after a valid First Frame is accepted,
+ * the total payload length is known, and the transfer state is initialized.
+ *
  * @note `OnReceiveProgress` receives `BytesReceived` as the delta since the previous
  * callback, not an absolute offset from the start of the transfer.
  */
@@ -268,7 +271,7 @@ typedef struct
     uint8_t IDE_TxID : 1;        /* use CCX_ide_t values: CCX_ID_STANDARD / CCX_ID_EXTENDED */
 #if CCX_ENABLE_CANFD
     CCX_frame_format_t FrameFormat : 2; /* Expected transport format of received ISO-TP frames */
-    uint8_t TxDL;                       /* FD only: link-layer payload used for transmitted FC frames */
+    uint8_t FC_TxDL;                    /* FD only: link-layer payload used for transmitted FC frames */
 #endif
     uint8_t BS;                  /* Block Size to request in FC (0 = no limit) */
     uint8_t STmin;               /* Separation Time minimum to request in FC */
@@ -284,6 +287,7 @@ typedef struct
     void *UserData; /* User context pointer passed to callbacks */
 
     /* Callbacks */
+    void (*OnReceiveStart)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t TotalLength, void *UserData);
     void (*OnReceiveComplete)(CCX_ISOTP_RX_t *Instance, const uint8_t *Data, CCX_ISOTP_Length_t Length, void *UserData);
     void (*OnReceiveProgress)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t BytesReceived,
                               CCX_ISOTP_Length_t TotalLength, void *UserData);
@@ -385,7 +389,7 @@ void CCX_ISOTP_TX_FC_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Ms
  * @param Config Pointer to RX configuration
  * @return CCX_ISOTP_OK on success, error code otherwise
  *
- * @note In FD builds, `Config->TxDL` is used only for transmitted Flow Control
+ * @note In FD builds, `Config->FC_TxDL` is used only for transmitted Flow Control
  * frames when the RX session itself is configured for FD.
  */
 CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_RX_Config_t *Config);

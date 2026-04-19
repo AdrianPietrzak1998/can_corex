@@ -446,9 +446,6 @@ CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, const CCX_ISOTP_T
 #endif
 
     memcpy(&Instance->Config, Config, sizeof(CCX_ISOTP_TX_Config_t));
-#if CCX_ENABLE_CANFD
-    Instance->Config.TxDL = active_tx_dl;
-#endif
     Instance->State = CCX_ISOTP_TX_STATE_IDLE;
     Instance->LastTick = 0;
     Instance->STmin_ms = 0U;
@@ -501,7 +498,7 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
 
 #if CCX_ENABLE_CANFD
     frame_format = Instance->Config.FrameFormat;
-    tx_dl = Instance->Config.TxDL;
+    tx_dl = ISOTP_GetConfiguredTxDL(frame_format, Instance->Config.TxDL);
 #else
     frame_format = CCX_FRAME_FORMAT_CLASSIC;
     tx_dl = ISOTP_CLASSIC_CAN_DL;
@@ -852,7 +849,7 @@ CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_R
     }
 
 #if CCX_ENABLE_CANFD
-    uint8_t active_tx_dl = ISOTP_GetConfiguredTxDL(Config->FrameFormat, Config->TxDL);
+    uint8_t active_tx_dl = ISOTP_GetConfiguredTxDL(Config->FrameFormat, Config->FC_TxDL);
     if (!ISOTP_IsValidTxDL(active_tx_dl))
     {
         return CCX_ISOTP_ERROR_INVALID_ARG;
@@ -860,9 +857,6 @@ CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_R
 #endif
 
     memcpy(&Instance->Config, Config, sizeof(CCX_ISOTP_RX_Config_t));
-#if CCX_ENABLE_CANFD
-    Instance->Config.TxDL = active_tx_dl;
-#endif
     Instance->State = CCX_ISOTP_RX_STATE_IDLE;
     Instance->LastTick = 0;
     ISOTP_ResetRXTransfer(Instance);
@@ -902,7 +896,7 @@ static inline void CCX_ISOTP_RX_SendFlowControl(CCX_ISOTP_RX_t *Instance, CCX_IS
 
 #if CCX_ENABLE_CANFD
     frame_format = Instance->Config.FrameFormat;
-    tx_dl = Instance->Config.TxDL;
+    tx_dl = ISOTP_GetConfiguredTxDL(frame_format, Instance->Config.FC_TxDL);
 #else
     frame_format = CCX_FRAME_FORMAT_CLASSIC;
     tx_dl = ISOTP_CLASSIC_CAN_DL;
@@ -1032,6 +1026,11 @@ static inline void CCX_ISOTP_RX_StartFirstFrame(CCX_ISOTP_RX_t *Instance, const 
     Instance->LastProgressCallback = 0U;
     Instance->ActiveRxDL = can_dl;
     Instance->LengthFormat = length_format;
+
+    if (Instance->Config.OnReceiveStart != NULL)
+    {
+        Instance->Config.OnReceiveStart(Instance, total_len, Instance->Config.UserData);
+    }
 
     CCX_ISOTP_RX_SendFlowControl(Instance, CCX_ISOTP_FC_CTS);
 }
