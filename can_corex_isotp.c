@@ -67,7 +67,7 @@ static inline uint8_t ISOTP_GetMessageFrameFormat(const CCX_message_t *msg)
 static inline uint8_t ISOTP_IsFDFrameFormat(uint8_t frame_format)
 {
 #if CCX_ENABLE_CANFD
-    return (uint8_t)(frame_format != CCX_FRAME_FORMAT_CLASSIC);
+    return (uint8_t)(frame_format == CCX_FRAME_FORMAT_FD || frame_format == CCX_FRAME_FORMAT_FD_BRS);
 #else
     (void)frame_format;
     return 0U;
@@ -529,12 +529,11 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
         );
 
         Instance->State = CCX_ISOTP_TX_STATE_IDLE;
+        ISOTP_ResetTXTransfer(Instance);
         if (Instance->Config.OnTransmitComplete != NULL)
         {
             Instance->Config.OnTransmitComplete(Instance, Instance->Config.UserData);
         }
-
-        ISOTP_ResetTXTransfer(Instance);
         return CCX_ISOTP_OK;
     }
 
@@ -669,6 +668,17 @@ static inline void CCX_ISOTP_TX_SendConsecutiveFrame(CCX_ISOTP_TX_t *Instance)
     data_capacity = ISOTP_GetConsecutiveFrameDataCapacity(Instance->ActiveTxDL);
     data_len = (remaining > (CCX_ISOTP_Length_t)data_capacity) ? data_capacity : (uint8_t)remaining;
 
+    if (Instance->TxData == NULL)
+    {
+        Instance->State = CCX_ISOTP_TX_STATE_IDLE;
+        if (Instance->Config.OnError != NULL)
+        {
+            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
+        }
+        ISOTP_ResetTXTransfer(Instance);
+        return;
+    }
+
 #if CCX_ENABLE_CANFD
     frame_format = Instance->Config.FrameFormat;
 #else
@@ -707,11 +717,11 @@ static inline void CCX_ISOTP_TX_SendConsecutiveFrame(CCX_ISOTP_TX_t *Instance)
     if (Instance->TxDataOffset >= Instance->TxDataLength)
     {
         Instance->State = CCX_ISOTP_TX_STATE_IDLE;
+        ISOTP_ResetTXTransfer(Instance);
         if (Instance->Config.OnTransmitComplete != NULL)
         {
             Instance->Config.OnTransmitComplete(Instance, Instance->Config.UserData);
         }
-        ISOTP_ResetTXTransfer(Instance);
         return;
     }
 
@@ -742,7 +752,7 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
         break;
 
     case CCX_ISOTP_TX_STATE_WAIT_FC:
-        if (current_tick - Instance->LastTick >= Instance->Config.N_Bs)
+        if (Instance->Config.N_Bs > 0U && current_tick - Instance->LastTick >= Instance->Config.N_Bs)
         {
             Instance->State = CCX_ISOTP_TX_STATE_IDLE;
             if (Instance->Config.OnError != NULL)
@@ -976,8 +986,22 @@ static inline void CCX_ISOTP_RX_HandleFirstFrame(CCX_ISOTP_RX_t *Instance, const
     if (total_len == 0U)
     {
 #if CCX_ENABLE_CANFD
+        if (!ISOTP_IsFDFrameFormat(frame_format))
+        {
+            if (Instance->State != CCX_ISOTP_RX_STATE_IDLE)
+            {
+                Instance->State = CCX_ISOTP_RX_STATE_IDLE;
+                ISOTP_ResetRXTransfer(Instance);
+            }
+            if (Instance->Config.OnError != NULL)
+            {
+                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
+            }
+            return;
+        }
+
         total_len = ISOTP_GetExtendedFFDataLength(msg);
-        if (!ISOTP_IsFDFrameFormat(frame_format) || can_dl <= ISOTP_EXTENDED_FF_HEADER_SIZE ||
+        if (can_dl <= ISOTP_EXTENDED_FF_HEADER_SIZE ||
             total_len <= (CCX_ISOTP_Length_t)ISOTP_STANDARD_FF_MAX_LENGTH ||
             total_len > (CCX_ISOTP_Length_t)CCX_ISOTP_MAX_FD_DATA_SIZE)
         {
@@ -1190,7 +1214,7 @@ void CCX_ISOTP_RX_Poll(CCX_ISOTP_RX_t *Instance)
     }
 
     current_tick = CCX_GET_TICK;
-    if (current_tick - Instance->LastTick >= Instance->Config.N_Cr)
+    if (Instance->Config.N_Cr > 0U && current_tick - Instance->LastTick >= Instance->Config.N_Cr)
     {
         Instance->State = CCX_ISOTP_RX_STATE_IDLE;
         if (Instance->Config.OnError != NULL)
