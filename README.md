@@ -4,7 +4,7 @@
 [![Version](https://img.shields.io/badge/Version-2.1.0-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-275--279%20classic%20%7C%20380--391%20FD%20passing-success.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-classic%20%2B%20FD%20matrix-blue.svg)]()
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
 
@@ -757,8 +757,9 @@ CAN CoreX includes ISO 15765-2 (ISO-TP) for classic CAN and CAN FD transports.
 - **Configurable Padding**:
   - classic instances pad to `8`
   - FD instances pad to configured `TxDL`
-- **Timeout Monitoring**: N_As, N_Bs, N_Cs, N_Ar, N_Br, N_Cr timeouts
-- **Progress Callbacks**: Monitor reception progress for large transfers
+- **Timeout Monitoring**: enforced `N_Bs`, `N_Cs`, `N_Cr`; informational `N_As`, `N_Ar`, `N_Br`
+- **Lifecycle Hooks**: `OnReceiveStart`, `OnReceiveProgress`, `OnReceiveComplete`, `OnError`
+- **Abort API**: `CCX_ISOTP_TX_Abort()` / `CCX_ISOTP_RX_Abort()`
 - **Separate TX/RX Instances**: Independent transmit and receive handling
 - **Extended ID Support**: Full support for both Standard (11-bit) and Extended (29-bit) CAN identifiers
 - **Per-instance length limits**:
@@ -771,6 +772,9 @@ CAN CoreX includes ISO 15765-2 (ISO-TP) for classic CAN and CAN FD transports.
 - Padding changes CAN frame payload length, not reported PDU length
 - In FD builds, `CCX_ISOTP_Length_t` is `uint32_t`; in classic-only builds it remains `uint16_t`
 - In FD builds, a classic ISO-TP instance still keeps the classic `4095`-byte limit
+- `OnReceiveProgress` reports a delta since the previous callback, not an absolute offset
+- `OnReceiveStart` fires once after a valid `FF` is accepted and the total payload length is known
+- `CCX_ISOTP_ERROR_TIMEOUT` remains a legacy alias of `CCX_ISOTP_ERROR_TIMEOUT_FC`
 
 ### Basic Usage
 
@@ -806,6 +810,7 @@ CCX_ISOTP_TX_Config_t tx_cfg = {
     .N_As = 1000,
     .N_Bs = 1000,
     .N_Cs = 1000,
+    .MaxWaitFrames = 10,      // Optional FC.WAIT tolerance (0 = library default)
     .Padding = {.Enable = 1, .PaddingByte = 0xAA},
     .UserData = NULL,        // User context pointer (optional)
     .OnTransmitComplete = tx_complete_callback,
@@ -847,6 +852,7 @@ CCX_ISOTP_TX_Config_t tx_cfg = {
     .N_As = 1000,
     .N_Bs = 1000,
     .N_Cs = 1000,
+    .MaxWaitFrames = 10,
     .Padding = {.Enable = 1, .PaddingByte = 0xAA},
     .OnTransmitComplete = tx_complete_callback,
     .OnError = tx_error_callback
@@ -893,6 +899,7 @@ CCX_ISOTP_RX_Config_t rx_cfg = {
     .RxBufferSize = sizeof(rx_buffer),
     .ProgressCallbackInterval = 0,  // Disable progress callbacks
     .UserData = NULL,        // User context pointer (optional)
+    .OnReceiveStart = NULL,
     .OnReceiveComplete = rx_complete_callback,
     .OnReceiveProgress = NULL,
     .OnError = rx_error_callback
@@ -922,6 +929,33 @@ void tx_complete_callback(CCX_ISOTP_TX_t *Instance, void *UserData) {
 }
 ```
 
+#### CAN FD ISO-TP Receiver Example
+
+In FD sessions the RX-side `FC_TxDL` controls only transmitted Flow Control frames:
+
+```c
+CCX_ISOTP_RX_Config_t rx_cfg = {
+    .CanInstance = &can,
+    .RxID = 0x123,
+    .TxID = 0x321,
+    .FrameFormat = CCX_FRAME_FORMAT_FD_BRS,
+    .FC_TxDL = CCX_ISOTP_TX_DL_64,
+    .BS = 0,
+    .STmin = 0,
+    .N_Ar = 1000,
+    .N_Br = 1000,
+    .N_Cr = 1000,
+    .Padding = {.Enable = 1, .PaddingByte = 0xAA},
+    .RxBuffer = rx_buffer,
+    .RxBufferSize = sizeof(rx_buffer),
+    .ProgressCallbackInterval = 512,
+    .OnReceiveStart = rx_start_callback,
+    .OnReceiveComplete = rx_complete_callback,
+    .OnReceiveProgress = rx_progress_callback,
+    .OnError = rx_error_callback
+};
+```
+
 ### Flow Control Frame Layout (ISO 15765-2)
 
 Flow Control frames follow the ISO 15765-2 standard layout:
@@ -946,6 +980,17 @@ FC frames respect the `Padding` configuration from RX:
 
 Both variants work correctly thanks to `CCX_DLC_ANY` wildcard matching in the RX table macros.
 
+### Abort and Timeout Diagnostics
+
+- `CCX_ISOTP_TX_Abort()` and `CCX_ISOTP_RX_Abort()` cancel an active transfer and reset the instance to `IDLE`
+- Active aborts emit `OnError(..., CCX_ISOTP_ERROR_ABORTED, ...)`
+- Timeout errors are phase-specific:
+  - `CCX_ISOTP_ERROR_TIMEOUT_FC` for `N_Bs`
+  - `CCX_ISOTP_ERROR_TIMEOUT_CF_TX` for `N_Cs`
+  - `CCX_ISOTP_ERROR_TIMEOUT_CF_RX` for `N_Cr`
+  - `CCX_ISOTP_ERROR_WAIT_EXCEEDED` for exhausted `FC.WAIT`
+- `CCX_ISOTP_ERROR_TIMEOUT` is kept as a legacy alias of `CCX_ISOTP_ERROR_TIMEOUT_FC`
+
 ### Progress Monitoring
 
 For large transfers, you can monitor reception progress:
@@ -960,9 +1005,11 @@ CCX_ISOTP_RX_Config_t rx_cfg = {
 void rx_progress_callback(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t BytesReceived,
                           CCX_ISOTP_Length_t TotalLength, void *UserData) {
     (void)Instance; (void)UserData;
-    printf("Progress: %d/%d bytes (%.1f%%)\n",
-           BytesReceived, TotalLength,
-           (100.0 * BytesReceived) / TotalLength);
+    static CCX_ISOTP_Length_t accumulated = 0;
+    accumulated += BytesReceived;  // BytesReceived is a delta from the previous callback
+    printf("Progress: %u/%u bytes (%.1f%%)\n",
+           (unsigned)accumulated, (unsigned)TotalLength,
+           (100.0 * accumulated) / TotalLength);
 }
 ```
 
@@ -1485,16 +1532,21 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 - **ISO-TP** (`can_corex_isotp`):
   - unified classic/FD API
   - `FrameFormat` selects classic / FD / FD_BRS session behavior
-  - `TxDL` selects FD link-layer payload size (`8/12/16/20/24/32/48/64`)
+  - TX uses `TxDL`; RX uses `FC_TxDL` for transmitted Flow Control frames
+  - `TxDL` / `FC_TxDL` select FD link-layer payload size (`8/12/16/20/24/32/48/64`)
   - classic instances keep the standard `4095`-byte limit
   - FD instances support extended `SF`, extended `FF`, and payload lengths above `4095`
   - `CCX_ISOTP_Length_t` is `uint32_t` in FD builds
   - padding is format-aware: classic pads to `8`, FD pads to `TxDL`
+  - `CCX_ISOTP_TX_Abort()` / `CCX_ISOTP_RX_Abort()` allow explicit transfer cancellation
+  - `OnReceiveStart` fires after a valid `FF`; `OnReceiveProgress` reports deltas
+  - phase-specific timeout diagnostics: `TIMEOUT_FC`, `TIMEOUT_CF_TX`, `TIMEOUT_CF_RX`, `WAIT_EXCEEDED`
+  - `N_As`, `N_Ar`, and `N_Br` are configuration fields but are informational only
 - **Test suite**: 7 build flavors
   - classic linear / binary / hash
   - FD linear / binary / hash
   - optional FD 32-bit stress build for the full `UINT32_MAX` ISO-TP path
-  - current default matrix: classic `275/275/279`, FD `380/380/391`
+  - current verified totals: classic linear/binary `340`, FD linear/binary `516`, FD hash `520`
 - **Breaking Changes** (FD builds only): `FDF`/`BRS` fields replaced by `FrameFormat`; `CCX_Init_Ex` removed; all RX entries now enforce FrameFormat matching
 - **Breaking Changes** (FD ISO-TP users): ISO-TP length-related APIs now use `CCX_ISOTP_Length_t`
 - **No breaking changes** for classic (`CCX_ENABLE_CANFD=0`) builds — fully backward compatible with v1.4.x

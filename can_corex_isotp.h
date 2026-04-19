@@ -120,16 +120,16 @@ typedef enum
     CCX_ISOTP_OK = 0,
     CCX_ISOTP_ERROR_NULL_PTR,
     CCX_ISOTP_ERROR_INVALID_ARG,
-    CCX_ISOTP_ERROR_TIMEOUT_FC,
+    CCX_ISOTP_ERROR_TIMEOUT_FC, /* Timeout while waiting for Flow Control (`N_Bs`) */
     CCX_ISOTP_ERROR_TIMEOUT = CCX_ISOTP_ERROR_TIMEOUT_FC, /* Legacy alias */
     CCX_ISOTP_ERROR_OVERFLOW,
     CCX_ISOTP_ERROR_BUSY,
     CCX_ISOTP_ERROR_SEQUENCE,
     CCX_ISOTP_ERROR_BUFFER_TOO_SMALL,
     CCX_ISOTP_ERROR_ABORTED,
-    CCX_ISOTP_ERROR_WAIT_EXCEEDED,
-    CCX_ISOTP_ERROR_TIMEOUT_CF_TX,
-    CCX_ISOTP_ERROR_TIMEOUT_CF_RX,
+    CCX_ISOTP_ERROR_WAIT_EXCEEDED, /* Too many `FC.WAIT` frames received */
+    CCX_ISOTP_ERROR_TIMEOUT_CF_TX, /* Timeout while scheduling/sending next CF (`N_Cs`) */
+    CCX_ISOTP_ERROR_TIMEOUT_CF_RX, /* Timeout while waiting for next received CF (`N_Cr`) */
 #if CCX_ENABLE_CANFD
     CCX_ISOTP_ERROR_FD_NOT_SUPPORTED, /* Reserved for legacy compatibility */
 #endif
@@ -261,6 +261,10 @@ typedef struct
  *
  * @note `OnReceiveProgress` receives `BytesReceived` as the delta since the previous
  * callback, not an absolute offset from the start of the transfer.
+ *
+ * @note `N_Ar` and `N_Br` are currently informational only. The library does not
+ * enforce them internally because it does not observe physical CAN controller
+ * transmission completion.
  */
 typedef struct
 {
@@ -343,8 +347,19 @@ struct CCX_ISOTP_RX_t
  * @note In FD builds, `Config->TxDL` is validated only for FD sessions.
  * Classic sessions keep the classic `4095`-byte transport limit even when
  * `CCX_ENABLE_CANFD=1`.
+ * @note `N_As` is currently informational only and is not enforced internally.
  */
 CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, const CCX_ISOTP_TX_Config_t *Config);
+
+/**
+ * @brief Abort an active ISO-TP TX transfer
+ *
+ * Resets the TX instance back to `IDLE`. If a transfer was active,
+ * `OnError(..., CCX_ISOTP_ERROR_ABORTED, ...)` is emitted.
+ *
+ * @param Instance Pointer to TX instance
+ * @return CCX_ISOTP_OK on success, error code otherwise
+ */
 CCX_ISOTP_Status_t CCX_ISOTP_TX_Abort(CCX_ISOTP_TX_t *Instance);
 
 /**
@@ -393,6 +408,16 @@ void CCX_ISOTP_TX_FC_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Ms
  * frames when the RX session itself is configured for FD.
  */
 CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_RX_Config_t *Config);
+
+/**
+ * @brief Abort an active ISO-TP RX transfer
+ *
+ * Resets the RX instance back to `IDLE`. If a transfer was active,
+ * `OnError(..., CCX_ISOTP_ERROR_ABORTED, ...)` is emitted.
+ *
+ * @param Instance Pointer to RX instance
+ * @return CCX_ISOTP_OK on success, error code otherwise
+ */
 CCX_ISOTP_Status_t CCX_ISOTP_RX_Abort(CCX_ISOTP_RX_t *Instance);
 
 /**

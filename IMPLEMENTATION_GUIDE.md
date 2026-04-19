@@ -1,6 +1,6 @@
 # CAN CoreX Implementation Guide
 
-**Version:** 2.0.0  
+**Version:** 2.1.0  
 **Author:** Adrian Pietrzak  
 **Date:** April 2026
 
@@ -3139,8 +3139,11 @@ This implementation guide covers:
 - Enable required interrupts and configure message RAM / filters before starting the peripheral
 - Use `CCX_Init` for all instances — frame format is per-message/per-entry via `CCX_frame_format_t`, not per-instance
 - Set `FrameFormat` in RX/TX table aggregate initializers (e.g. `.FrameFormat = CCX_FRAME_FORMAT_FD_BRS`); `CCX_FRAME_FORMAT_CLASSIC=0` is the C zero-init default; field-by-field tables require `memset(table, 0, sizeof(table))` before population
-- In `can_corex_isotp`, payload-length limits are per ISO-TP instance: classic stays at `4095`, FD uses `CCX_ISOTP_MAX_FD_DATA_SIZE`; FD sessions also require a valid `TxDL` (`8/12/16/20/24/32/48/64`)
-- ISO-TP header selection is based on PDU length before padding; classic pads to `8`, FD pads to `TxDL`
+- In `can_corex_isotp`, payload-length limits are per ISO-TP instance: classic stays at `4095`, FD uses `CCX_ISOTP_MAX_FD_DATA_SIZE`; FD TX sessions require a valid `TxDL`, while FD RX sessions use `FC_TxDL` for transmitted Flow Control frames (`8/12/16/20/24/32/48/64`)
+- ISO-TP header selection is based on PDU length before padding; classic pads to `8`, FD pads to `TxDL` / `FC_TxDL` as appropriate
+- Current ISO-TP lifecycle helpers include `CCX_ISOTP_TX_Abort()`, `CCX_ISOTP_RX_Abort()`, `OnReceiveStart`, and delta-based `OnReceiveProgress`
+- ISO-TP timeout diagnostics are phase-specific (`TIMEOUT_FC`, `TIMEOUT_CF_TX`, `TIMEOUT_CF_RX`, `WAIT_EXCEEDED`); `CCX_ISOTP_ERROR_TIMEOUT` remains a legacy alias
+- `N_As`, `N_Ar`, and `N_Br` exist in the config structures but are currently informational only; the library enforces `N_Bs`, `N_Cs`, and `N_Cr`
 - If hardware auto bus-off recovery is active (bxCAN ABOM, or custom platform feature), use `auto_recovery_enabled = 0` — let hardware recover, use the library only for monitoring
 - `CCX_FD_DLC_TO_LEN[dlc]` converts raw DLC 0–15 to actual byte count; `CCX_FD_LenToDLC(n)` does the reverse
 - Bus monitoring `recovery_delay` should be ≥ the ISO 11898-1 minimum for your nominal bit rate (see `CAN_COREX_BUS_OFF_RECOVERY_*_MS` macros)
