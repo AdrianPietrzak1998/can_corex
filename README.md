@@ -773,6 +773,9 @@ CAN CoreX includes ISO 15765-2 (ISO-TP) for classic CAN and CAN FD transports.
 - In FD builds, `CCX_ISOTP_Length_t` is `uint32_t`; in classic-only builds it remains `uint16_t`
 - In FD builds, a classic ISO-TP instance still keeps the classic `4095`-byte limit
 - `OnReceiveProgress` reports a delta since the previous callback, not an absolute offset
+- To print `received/total`, accumulate `BytesReceived` yourself or read `Instance->RxDataOffset`; do not interpret `BytesReceived` as the total bytes received so far
+- `N_Cr` measures inactivity between CF frames, not whether the next received CF is the expected one
+- If one CF is lost but a later CF arrives before `N_Cr` expires, RX will typically end with `CCX_ISOTP_ERROR_SEQUENCE`, not `CCX_ISOTP_ERROR_TIMEOUT_CF_RX`
 - `OnReceiveStart` fires once after a valid `FF` is accepted and the total payload length is known
 - `CCX_ISOTP_ERROR_TIMEOUT` remains a legacy alias of `CCX_ISOTP_ERROR_TIMEOUT_FC`
 
@@ -1012,6 +1015,14 @@ void rx_progress_callback(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t BytesRece
            (100.0 * accumulated) / TotalLength);
 }
 ```
+
+Incorrect usage example:
+
+```c
+printf("Progress: %u/%u\n", (unsigned)(TotalLength - BytesReceived), (unsigned)TotalLength);
+```
+
+This is wrong because `BytesReceived` is a delta, so the output will jump around instead of showing monotonic progress.
 
 ### Extended ID Support
 

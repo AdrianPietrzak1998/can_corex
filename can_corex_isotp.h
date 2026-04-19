@@ -124,7 +124,7 @@ typedef enum
     CCX_ISOTP_ERROR_TIMEOUT = CCX_ISOTP_ERROR_TIMEOUT_FC, /* Legacy alias */
     CCX_ISOTP_ERROR_OVERFLOW,
     CCX_ISOTP_ERROR_BUSY,
-    CCX_ISOTP_ERROR_SEQUENCE,
+    CCX_ISOTP_ERROR_SEQUENCE, /* Unexpected PCI / Flow Status / CF sequence number; may occur before any timeout if a later frame arrives in time */
     CCX_ISOTP_ERROR_BUFFER_TOO_SMALL,
     CCX_ISOTP_ERROR_ABORTED,
     CCX_ISOTP_ERROR_WAIT_EXCEEDED, /* Too many `FC.WAIT` frames received */
@@ -281,7 +281,7 @@ typedef struct
     uint8_t STmin;               /* Separation Time minimum to request in FC */
     CCX_TIME_t N_Ar;             /* Informational timeout for RX of SF/FF/CF; not enforced internally */
     CCX_TIME_t N_Br;             /* Informational timeout for FC transmission after FF/CF; not enforced internally */
-    CCX_TIME_t N_Cr;             /* Timeout between received CF (default: 1000ms) */
+    CCX_TIME_t N_Cr;             /* Timeout between received CF (default: 1000ms). Detects silence, not correctness: if a later CF arrives before `N_Cr` expires, RX may fail with `CCX_ISOTP_ERROR_SEQUENCE` instead of `CCX_ISOTP_ERROR_TIMEOUT_CF_RX` */
     CCX_ISOTP_Padding_t Padding; /* Padding configuration */
 
     uint8_t *RxBuffer;                           /* Buffer for received data */
