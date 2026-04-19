@@ -1,17 +1,17 @@
 # CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-2.0.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-2.1.0-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-275--279%20classic%20%7C%20322--326%20FD%20passing-success.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-275--279%20classic%20%7C%20380--391%20FD%20passing-success.svg)]()
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
 
 
 ## Overview
 
-CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, ISO-TP transport protocol, and comprehensive bus health monitoring with automatic error recovery. Version 2.0.0 adds CAN FD support (64-byte payloads, BRS, ESI) via a compile-time feature gate alongside existing CAN 2.0 support, with per-message frame format selection via `CCX_frame_format_t` (CLASSIC / FD / FD_BRS). Version 1.4.0 introduced compile-time configurable RX message lookup strategies for optimized performance.
+CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, ISO-TP transport protocol, and comprehensive bus health monitoring with automatic error recovery. Version 2.1.0 extends ISO-TP to CAN FD payload transport with configurable `TxDL`, extended single-frame/first-frame length encoding, and payload lengths above `4095` on FD instances. Classic CAN behavior remains unchanged, and RX lookup strategy selection (linear / binary / hash) is still compile-time configurable.
 
 ## Table of Contents
 
@@ -38,7 +38,7 @@ CAN CoreX is a lightweight, modular CAN bus communication library designed for e
 - **Periodic Transmission**: Automatic periodic message sending via TX tables
 - **Network Replication**: Multi-instance message routing and replication
 - **Timestamp Tracking**: Automatic message receive time recording
-- **ISO-TP Protocol**: ISO 15765-2 transport layer for multi-frame messages
+- **ISO-TP Protocol**: ISO 15765-2 transport layer for classic CAN and CAN FD instances
 - **Extended ID Support**: Full support for both Standard (11-bit) and Extended (29-bit) CAN IDs
 - **Wildcard Matching**: Accept any DLC with `CCX_DLC_ANY` in RX table
 - **CAN FD Support** (`-DCCX_ENABLE_CANFD=1`): 64-byte payloads, BRS, ESI, per-message frame format via `CCX_frame_format_t` (CLASSIC / FD / FD_BRS)
@@ -747,18 +747,30 @@ CCX_net_init(&can_network);
 
 ## ISO-TP Transport Protocol
 
-CAN CoreX includes ISO 15765-2 (ISO-TP) implementation for sending messages larger than 8 bytes over CAN.
+CAN CoreX includes ISO 15765-2 (ISO-TP) for classic CAN and CAN FD transports.
 
 ### Features
 
-- **Single Frame (SF)**: Messages up to 7 bytes
-- **Multi-Frame (FF + CF)**: Messages up to 4095 bytes with flow control
+- **Classic CAN instances**: Standard `SF` up to 7 bytes, standard `FF + CF` up to 4095 bytes
+- **CAN FD instances**: Standard `SF` up to 7 bytes, extended `SF` for larger single-frame payloads, standard `FF` up to 4095 bytes, extended `FF` above 4095 bytes
 - **Flow Control (FC)**: CTS/WAIT/OVFLW support
-- **Configurable Padding**: Optional padding for all frame types
+- **Configurable Padding**:
+  - classic instances pad to `8`
+  - FD instances pad to configured `TxDL`
 - **Timeout Monitoring**: N_As, N_Bs, N_Cs, N_Ar, N_Br, N_Cr timeouts
 - **Progress Callbacks**: Monitor reception progress for large transfers
 - **Separate TX/RX Instances**: Independent transmit and receive handling
 - **Extended ID Support**: Full support for both Standard (11-bit) and Extended (29-bit) CAN identifiers
+- **Per-instance length limits**:
+  - classic instance: `CCX_ISOTP_MAX_CLASSIC_DATA_SIZE` (`4095` by default)
+  - FD instance: `CCX_ISOTP_MAX_FD_DATA_SIZE` (`UINT32_MAX` by default, bounded by application buffers)
+
+### Important Semantics
+
+- Header selection is based on ISO-TP payload length **before padding**
+- Padding changes CAN frame payload length, not reported PDU length
+- In FD builds, `CCX_ISOTP_Length_t` is `uint32_t`; in classic-only builds it remains `uint16_t`
+- In FD builds, a classic ISO-TP instance still keeps the classic `4095`-byte limit
 
 ### Basic Usage
 
@@ -813,6 +825,36 @@ while (1) {
 }
 ```
 
+#### CAN FD ISO-TP Example
+
+Use the `_EX` table macros when the ISO-TP session uses FD frames:
+
+```c
+CCX_RX_table_t rx_table[] = {
+    CCX_ISOTP_TX_FC_TABLE_ENTRY_EX(&isotp_tx, 0x321, 0, CCX_FRAME_FORMAT_FD_BRS)
+};
+
+CCX_ISOTP_TX_Config_t tx_cfg = {
+    .CanInstance = &can,
+    .TxID = 0x123,
+    .RxID_FC = 0x321,
+    .IDE_TxID = 0,
+    .IDE_RxID_FC = 0,
+    .FrameFormat = CCX_FRAME_FORMAT_FD_BRS,
+    .TxDL = CCX_ISOTP_TX_DL_64,
+    .BS = 0,
+    .STmin = 0,
+    .N_As = 1000,
+    .N_Bs = 1000,
+    .N_Cs = 1000,
+    .Padding = {.Enable = 1, .PaddingByte = 0xAA},
+    .OnTransmitComplete = tx_complete_callback,
+    .OnError = tx_error_callback
+};
+```
+
+`TxDL` accepts only legal FD payload sizes: `8, 12, 16, 20, 24, 32, 48, 64`.
+
 #### Receiver Node (Receiving ISO-TP Messages)
 
 ```c
@@ -866,7 +908,7 @@ while (1) {
 
 **Complete Callback Example**:
 ```c
-void rx_complete_callback(CCX_ISOTP_RX_t *Instance, const uint8_t *Data, uint16_t Length, void *UserData) {
+void rx_complete_callback(CCX_ISOTP_RX_t *Instance, const uint8_t *Data, CCX_ISOTP_Length_t Length, void *UserData) {
     (void)Instance;
     (void)UserData;
     printf("Received %d bytes via ISO-TP\n", Length);
@@ -915,7 +957,8 @@ CCX_ISOTP_RX_Config_t rx_cfg = {
     .OnReceiveProgress = rx_progress_callback,
 };
 
-void rx_progress_callback(CCX_ISOTP_RX_t *Instance, uint16_t BytesReceived, uint16_t TotalLength, void *UserData) {
+void rx_progress_callback(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t BytesReceived,
+                          CCX_ISOTP_Length_t TotalLength, void *UserData) {
     (void)Instance; (void)UserData;
     printf("Progress: %d/%d bytes (%.1f%%)\n",
            BytesReceived, TotalLength,
@@ -1407,7 +1450,9 @@ void can_task(void *param) {
 
 1. **Buffer Size**: Fixed at compile time (`CCX_RX_BUFFER_SIZE`, `CCX_TX_BUFFER_SIZE`)
 2. **DLC Range**: 0-8 in classic builds (CAN 2.0); 0-15 in FD builds (`-DCCX_ENABLE_CANFD=1`)
-3. **ISO-TP FD payload**: Classic ISO-TP on FD instances is fully supported (ISO 15765-2 compliant — FDCAN peripherals can send classic frames). Set `FrameFormat = CCX_FRAME_FORMAT_CLASSIC` in `CCX_ISOTP_TX_Config_t` / `CCX_ISOTP_RX_Config_t`. FD payload ISO-TP (`FrameFormat != CLASSIC`) returns `CCX_ISOTP_ERROR_FD_NOT_SUPPORTED` — planned for v2.1
+3. **ISO-TP effective payload limit depends on instance format**:
+   - classic instance: `CCX_ISOTP_MAX_CLASSIC_DATA_SIZE` (`4095` by default)
+   - FD instance: `CCX_ISOTP_MAX_FD_DATA_SIZE` (`UINT32_MAX` by default, still bounded by application buffer sizes and available memory)
 4. **Timeout Range**: Limited by `CCX_TIME_t` type (default: `uint32_t`)
 5. **Not Thread-Safe**: Requires external synchronization in multi-threaded environments
 
@@ -1425,7 +1470,7 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v2.0.0 (2026-04-18)
+### Current Release: v2.1.0 (2026-04-19)
 - **CAN FD Support** (`-DCCX_ENABLE_CANFD=1`): 64-byte payloads, BRS, ESI — zero overhead when disabled
   - `CCX_frame_format_t` (3 values): `CCX_FRAME_FORMAT_CLASSIC=0`, `CCX_FRAME_FORMAT_FD=1`, `CCX_FRAME_FORMAT_FD_BRS=2` — replaces separate `FDF:1 + BRS:1` bitfields; present in `CCX_message_t`, `CCX_RX_table_t`, `CCX_TX_table_t`; per-message/per-entry (not per-instance)
   - `CCX_ide_t` enum: `CCX_ID_STANDARD=0`, `CCX_ID_EXTENDED=1` — named constants for all `IDE_flag` fields
@@ -1437,10 +1482,21 @@ Mozilla Public License 2.0 - see LICENSE file for details.
   - `CCX_FD_LenToDLC()` / `CCX_MsgPayloadLen()`: helpers for FD length ↔ DLC conversion
   - `CCX_FD_DLC_TO_LEN[16]` LUT: compile-time array mapping DLC codes to byte lengths
 - **Network layer** (`can_corex_net`): no FD-to-classic frame filtering — FD frames replicate freely; `dropped_mixed` stat removed
-- **ISO-TP** (`can_corex_isotp`): classic ISO-TP on FD instances **fully supported** (ISO 15765-2 compliant); `FrameFormat` field in `CCX_ISOTP_TX_Config_t` / `CCX_ISOTP_RX_Config_t`; FD payload returns `CCX_ISOTP_ERROR_FD_NOT_SUPPORTED` (planned for v2.1)
-- **Test suite**: 47 CAN FD tests; 6 build flavors (classic linear/binary/hash + FD linear/binary/hash)
-  - Classic: 275/275/279 tests passing; FD: 322/322/326 tests passing
+- **ISO-TP** (`can_corex_isotp`):
+  - unified classic/FD API
+  - `FrameFormat` selects classic / FD / FD_BRS session behavior
+  - `TxDL` selects FD link-layer payload size (`8/12/16/20/24/32/48/64`)
+  - classic instances keep the standard `4095`-byte limit
+  - FD instances support extended `SF`, extended `FF`, and payload lengths above `4095`
+  - `CCX_ISOTP_Length_t` is `uint32_t` in FD builds
+  - padding is format-aware: classic pads to `8`, FD pads to `TxDL`
+- **Test suite**: 7 build flavors
+  - classic linear / binary / hash
+  - FD linear / binary / hash
+  - optional FD 32-bit stress build for the full `UINT32_MAX` ISO-TP path
+  - current default matrix: classic `275/275/279`, FD `380/380/391`
 - **Breaking Changes** (FD builds only): `FDF`/`BRS` fields replaced by `FrameFormat`; `CCX_Init_Ex` removed; all RX entries now enforce FrameFormat matching
+- **Breaking Changes** (FD ISO-TP users): ISO-TP length-related APIs now use `CCX_ISOTP_Length_t`
 - **No breaking changes** for classic (`CCX_ENABLE_CANFD=0`) builds — fully backward compatible with v1.4.x
 
 ### v1.4.4 (2026-04-01)
@@ -1615,3 +1671,6 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 - 🎉 Initial release
 
 ---
+
+
+
