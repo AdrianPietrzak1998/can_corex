@@ -120,11 +120,16 @@ typedef enum
     CCX_ISOTP_OK = 0,
     CCX_ISOTP_ERROR_NULL_PTR,
     CCX_ISOTP_ERROR_INVALID_ARG,
-    CCX_ISOTP_ERROR_TIMEOUT,
+    CCX_ISOTP_ERROR_TIMEOUT_FC,
+    CCX_ISOTP_ERROR_TIMEOUT = CCX_ISOTP_ERROR_TIMEOUT_FC, /* Legacy alias */
     CCX_ISOTP_ERROR_OVERFLOW,
     CCX_ISOTP_ERROR_BUSY,
     CCX_ISOTP_ERROR_SEQUENCE,
     CCX_ISOTP_ERROR_BUFFER_TOO_SMALL,
+    CCX_ISOTP_ERROR_ABORTED,
+    CCX_ISOTP_ERROR_WAIT_EXCEEDED,
+    CCX_ISOTP_ERROR_TIMEOUT_CF_TX,
+    CCX_ISOTP_ERROR_TIMEOUT_CF_RX,
 #if CCX_ENABLE_CANFD
     CCX_ISOTP_ERROR_FD_NOT_SUPPORTED, /* Reserved for legacy compatibility */
 #endif
@@ -209,6 +214,7 @@ typedef struct
     CCX_TIME_t N_As;             /* Informational timeout for TX of SF/FF/CF; not enforced internally */
     CCX_TIME_t N_Bs;             /* Timeout for reception of FC after FF/CF (default: 1000ms) */
     CCX_TIME_t N_Cs;             /* Timeout between CF transmissions (default: 1000ms) */
+    uint8_t MaxWaitFrames;       /* Number of FC.WAIT frames tolerated before aborting (0 = default 10) */
     CCX_ISOTP_Padding_t Padding; /* Padding configuration */
 
     void *UserData; /* User context pointer passed to callbacks */
@@ -301,6 +307,7 @@ struct CCX_ISOTP_TX_t
     uint8_t WaitFramesRemaining;     /* Number of WAIT FC frames we can tolerate */
     CCX_TIME_VALUE_t STmin_ms;       /* STmin value from FC converted to milliseconds */
     uint8_t ActiveTxDL;              /* Active link-layer payload for TX */
+    uint8_t MaxWaitFrames;           /* Effective FC.WAIT tolerance for this instance */
     CCX_ISOTP_LengthFormat_t LengthFormat;
 };
 
@@ -334,6 +341,7 @@ struct CCX_ISOTP_RX_t
  * `CCX_ENABLE_CANFD=1`.
  */
 CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, const CCX_ISOTP_TX_Config_t *Config);
+CCX_ISOTP_Status_t CCX_ISOTP_TX_Abort(CCX_ISOTP_TX_t *Instance);
 
 /**
  * @brief Transmit data using ISO-TP
@@ -381,6 +389,7 @@ void CCX_ISOTP_TX_FC_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Ms
  * frames when the RX session itself is configured for FD.
  */
 CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_RX_Config_t *Config);
+CCX_ISOTP_Status_t CCX_ISOTP_RX_Abort(CCX_ISOTP_RX_t *Instance);
 
 /**
  * @brief Parser function for CAN CoreX RX table

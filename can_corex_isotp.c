@@ -31,7 +31,7 @@ extern CCX_TIME_t *CCX_tick;
 #define ISOTP_FC_FRAME_DATA_SIZE 3U
 #define ISOTP_CLASSIC_CAN_DL 8U
 #define ISOTP_FD_DEFAULT_TX_DL CCX_ISOTP_TX_DL_64
-#define ISOTP_MAX_WAIT_FRAMES 10U
+#define ISOTP_DEFAULT_MAX_WAIT_FRAMES 10U
 #define ISOTP_STANDARD_FF_MAX_LENGTH 4095UL
 #define ISOTP_EXTENDED_FF_ESCAPE 0x00U
 #define ISOTP_EXTENDED_SF_ESCAPE 0x00U
@@ -166,6 +166,11 @@ static inline uint8_t ISOTP_GetConfiguredTxDL(uint8_t frame_format, uint8_t conf
     (void)configured_tx_dl;
     return ISOTP_CLASSIC_CAN_DL;
 #endif
+}
+
+static inline uint8_t ISOTP_GetConfiguredMaxWaitFrames(uint8_t configured_max_wait_frames)
+{
+    return (configured_max_wait_frames == 0U) ? ISOTP_DEFAULT_MAX_WAIT_FRAMES : configured_max_wait_frames;
 }
 
 static inline uint8_t ISOTP_GetSingleFrameMaxPayload(uint8_t frame_format, uint8_t can_dl)
@@ -388,7 +393,7 @@ static inline void ISOTP_ResetTXTransfer(CCX_ISOTP_TX_t *Instance)
     Instance->TxDataOffset = 0U;
     Instance->SequenceNumber = 0U;
     Instance->BlockCounter = 0U;
-    Instance->WaitFramesRemaining = ISOTP_MAX_WAIT_FRAMES;
+    Instance->WaitFramesRemaining = Instance->MaxWaitFrames;
     Instance->ActiveTxDL = ISOTP_CLASSIC_CAN_DL;
     Instance->LengthFormat = CCX_ISOTP_LENGTH_FORMAT_STANDARD;
 }
@@ -404,6 +409,17 @@ static inline void ISOTP_ResetRXTransfer(CCX_ISOTP_RX_t *Instance)
     Instance->LengthFormat = CCX_ISOTP_LENGTH_FORMAT_STANDARD;
 }
 
+static inline uint8_t ISOTP_IsTXTransferActive(const CCX_ISOTP_TX_t *Instance)
+{
+    return (uint8_t)((Instance->State == CCX_ISOTP_TX_STATE_WAIT_FC || Instance->State == CCX_ISOTP_TX_STATE_SENDING_CF) &&
+                     (Instance->TxData != NULL || Instance->TxDataLength > 0U));
+}
+
+static inline uint8_t ISOTP_IsRXTransferActive(const CCX_ISOTP_RX_t *Instance)
+{
+    return (uint8_t)(Instance->State == CCX_ISOTP_RX_STATE_RECEIVING_CF && Instance->RxDataLength > 0U);
+}
+
 CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, const CCX_ISOTP_TX_Config_t *Config)
 {
     if (NULL == Instance || NULL == Config)
@@ -414,6 +430,11 @@ CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, const CCX_ISOTP_T
     if (NULL == Config->CanInstance)
     {
         return CCX_ISOTP_ERROR_NULL_PTR;
+    }
+
+    if (ISOTP_IsTXTransferActive(Instance))
+    {
+        return CCX_ISOTP_ERROR_BUSY;
     }
 
 #if CCX_ENABLE_CANFD
@@ -431,7 +452,29 @@ CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, const CCX_ISOTP_T
     Instance->State = CCX_ISOTP_TX_STATE_IDLE;
     Instance->LastTick = 0;
     Instance->STmin_ms = 0U;
+    Instance->MaxWaitFrames = ISOTP_GetConfiguredMaxWaitFrames(Config->MaxWaitFrames);
     ISOTP_ResetTXTransfer(Instance);
+
+    return CCX_ISOTP_OK;
+}
+
+CCX_ISOTP_Status_t CCX_ISOTP_TX_Abort(CCX_ISOTP_TX_t *Instance)
+{
+    uint8_t was_active;
+
+    if (NULL == Instance)
+    {
+        return CCX_ISOTP_ERROR_NULL_PTR;
+    }
+
+    was_active = ISOTP_IsTXTransferActive(Instance);
+    Instance->State = CCX_ISOTP_TX_STATE_IDLE;
+    ISOTP_ResetTXTransfer(Instance);
+
+    if (was_active && Instance->Config.OnError != NULL)
+    {
+        Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_ABORTED, Instance->Config.UserData);
+    }
 
     return CCX_ISOTP_OK;
 }
@@ -493,7 +536,7 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
     Instance->TxDataOffset = 0U;
     Instance->SequenceNumber = 0U;
     Instance->BlockCounter = 0U;
-    Instance->WaitFramesRemaining = ISOTP_MAX_WAIT_FRAMES;
+    Instance->WaitFramesRemaining = Instance->MaxWaitFrames;
     Instance->ActiveTxDL = tx_dl;
     Instance->LengthFormat = CCX_ISOTP_LENGTH_FORMAT_STANDARD;
 
@@ -612,7 +655,7 @@ static inline void CCX_ISOTP_TX_HandleFlowControl(CCX_ISOTP_TX_t *Instance, cons
         Instance->STmin_ms = ISOTP_ConvertSTminToMs(ISOTP_GetFCSTmin(msg));
         Instance->State = CCX_ISOTP_TX_STATE_SENDING_CF;
         Instance->LastTick = CCX_GET_TICK;
-        Instance->WaitFramesRemaining = ISOTP_MAX_WAIT_FRAMES;
+        Instance->WaitFramesRemaining = Instance->MaxWaitFrames;
         break;
 
     case CCX_ISOTP_FC_WAIT:
@@ -626,7 +669,7 @@ static inline void CCX_ISOTP_TX_HandleFlowControl(CCX_ISOTP_TX_t *Instance, cons
             Instance->State = CCX_ISOTP_TX_STATE_IDLE;
             if (Instance->Config.OnError != NULL)
             {
-                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT, Instance->Config.UserData);
+                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_WAIT_EXCEEDED, Instance->Config.UserData);
             }
             ISOTP_ResetTXTransfer(Instance);
         }
@@ -757,7 +800,7 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
             Instance->State = CCX_ISOTP_TX_STATE_IDLE;
             if (Instance->Config.OnError != NULL)
             {
-                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT, Instance->Config.UserData);
+                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT_FC, Instance->Config.UserData);
             }
             ISOTP_ResetTXTransfer(Instance);
         }
@@ -769,7 +812,7 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
             Instance->State = CCX_ISOTP_TX_STATE_IDLE;
             if (Instance->Config.OnError != NULL)
             {
-                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT, Instance->Config.UserData);
+                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT_CF_TX, Instance->Config.UserData);
             }
             ISOTP_ResetTXTransfer(Instance);
             break;
@@ -803,6 +846,11 @@ CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_R
         return CCX_ISOTP_ERROR_INVALID_ARG;
     }
 
+    if (ISOTP_IsRXTransferActive(Instance))
+    {
+        return CCX_ISOTP_ERROR_BUSY;
+    }
+
 #if CCX_ENABLE_CANFD
     uint8_t active_tx_dl = ISOTP_GetConfiguredTxDL(Config->FrameFormat, Config->TxDL);
     if (!ISOTP_IsValidTxDL(active_tx_dl))
@@ -818,6 +866,27 @@ CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_R
     Instance->State = CCX_ISOTP_RX_STATE_IDLE;
     Instance->LastTick = 0;
     ISOTP_ResetRXTransfer(Instance);
+
+    return CCX_ISOTP_OK;
+}
+
+CCX_ISOTP_Status_t CCX_ISOTP_RX_Abort(CCX_ISOTP_RX_t *Instance)
+{
+    uint8_t was_active;
+
+    if (NULL == Instance)
+    {
+        return CCX_ISOTP_ERROR_NULL_PTR;
+    }
+
+    was_active = ISOTP_IsRXTransferActive(Instance);
+    Instance->State = CCX_ISOTP_RX_STATE_IDLE;
+    ISOTP_ResetRXTransfer(Instance);
+
+    if (was_active && Instance->Config.OnError != NULL)
+    {
+        Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_ABORTED, Instance->Config.UserData);
+    }
 
     return CCX_ISOTP_OK;
 }
@@ -1219,7 +1288,7 @@ void CCX_ISOTP_RX_Poll(CCX_ISOTP_RX_t *Instance)
         Instance->State = CCX_ISOTP_RX_STATE_IDLE;
         if (Instance->Config.OnError != NULL)
         {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT, Instance->Config.UserData);
+            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT_CF_RX, Instance->Config.UserData);
         }
         ISOTP_ResetRXTransfer(Instance);
     }
