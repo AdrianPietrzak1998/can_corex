@@ -206,7 +206,7 @@ typedef struct
 #endif
     uint8_t BS;                  /* Block Size: number of CF before expecting FC (0 = no limit) */
     uint8_t STmin;               /* Separation Time minimum (0-127ms or 0xF1-0xF9 for 100-900us) */
-    CCX_TIME_t N_As;             /* Timeout for TX of SF/FF/CF (default: 1000ms) */
+    CCX_TIME_t N_As;             /* Informational timeout for TX of SF/FF/CF; not enforced internally */
     CCX_TIME_t N_Bs;             /* Timeout for reception of FC after FF/CF (default: 1000ms) */
     CCX_TIME_t N_Cs;             /* Timeout between CF transmissions (default: 1000ms) */
     CCX_ISOTP_Padding_t Padding; /* Padding configuration */
@@ -249,6 +249,9 @@ typedef struct
  *     fprintf(ctx->log_file, "Progress: %d/%d bytes\n", ctx->total_bytes_received, TotalLength);
  * }
  * @endcode
+ *
+ * @note `OnReceiveProgress` receives `BytesReceived` as the delta since the previous
+ * callback, not an absolute offset from the start of the transfer.
  */
 typedef struct
 {
@@ -263,14 +266,14 @@ typedef struct
 #endif
     uint8_t BS;                  /* Block Size to request in FC (0 = no limit) */
     uint8_t STmin;               /* Separation Time minimum to request in FC */
-    CCX_TIME_t N_Ar;             /* Timeout for RX of SF/FF/CF (default: 1000ms) */
-    CCX_TIME_t N_Br;             /* Timeout for transmission of FC after FF/CF (default: 1000ms) */
+    CCX_TIME_t N_Ar;             /* Informational timeout for RX of SF/FF/CF; not enforced internally */
+    CCX_TIME_t N_Br;             /* Informational timeout for FC transmission after FF/CF; not enforced internally */
     CCX_TIME_t N_Cr;             /* Timeout between received CF (default: 1000ms) */
     CCX_ISOTP_Padding_t Padding; /* Padding configuration */
 
     uint8_t *RxBuffer;                           /* Buffer for received data */
     CCX_ISOTP_Length_t RxBufferSize;             /* Size of RX buffer */
-    CCX_ISOTP_Length_t ProgressCallbackInterval; /* Call progress callback every N bytes (0 = disabled) */
+    CCX_ISOTP_Length_t ProgressCallbackInterval; /* Call progress callback every N newly received bytes (0 = disabled) */
 
     void *UserData; /* User context pointer passed to callbacks */
 

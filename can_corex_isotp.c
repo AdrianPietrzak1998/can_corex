@@ -290,7 +290,7 @@ static inline CCX_TIME_VALUE_t ISOTP_ConvertSTminToMs(uint8_t stmin_raw)
     }
     else
     {
-        return 0U;
+        return 127U;
     }
 }
 
@@ -937,6 +937,8 @@ static inline void CCX_ISOTP_RX_StartFirstFrame(CCX_ISOTP_RX_t *Instance, const 
         {
             Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_BUFFER_TOO_SMALL, Instance->Config.UserData);
         }
+        Instance->State = CCX_ISOTP_RX_STATE_IDLE;
+        ISOTP_ResetRXTransfer(Instance);
         return;
     }
 
@@ -979,6 +981,11 @@ static inline void CCX_ISOTP_RX_HandleFirstFrame(CCX_ISOTP_RX_t *Instance, const
             total_len <= (CCX_ISOTP_Length_t)ISOTP_STANDARD_FF_MAX_LENGTH ||
             total_len > (CCX_ISOTP_Length_t)CCX_ISOTP_MAX_FD_DATA_SIZE)
         {
+            if (Instance->State != CCX_ISOTP_RX_STATE_IDLE)
+            {
+                Instance->State = CCX_ISOTP_RX_STATE_IDLE;
+                ISOTP_ResetRXTransfer(Instance);
+            }
             if (Instance->Config.OnError != NULL)
             {
                 Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
@@ -1001,6 +1008,11 @@ static inline void CCX_ISOTP_RX_HandleFirstFrame(CCX_ISOTP_RX_t *Instance, const
         total_len <= (CCX_ISOTP_Length_t)standard_ff_payload ||
         total_len > (CCX_ISOTP_Length_t)CCX_ISOTP_MAX_CLASSIC_DATA_SIZE)
     {
+        if (Instance->State != CCX_ISOTP_RX_STATE_IDLE)
+        {
+            Instance->State = CCX_ISOTP_RX_STATE_IDLE;
+            ISOTP_ResetRXTransfer(Instance);
+        }
         if (Instance->Config.OnError != NULL)
         {
             Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
