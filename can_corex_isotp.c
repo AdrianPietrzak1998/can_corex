@@ -283,20 +283,40 @@ static inline uint8_t ISOTP_GetFCSTmin(const CCX_message_t *msg)
     return msg->Data[2];
 }
 
-static inline CCX_TIME_VALUE_t ISOTP_ConvertSTminToMs(uint8_t stmin_raw)
+static inline CCX_TIME_VALUE_t ISOTP_ConvertSTminToInternal(uint8_t stmin_raw)
 {
+#ifdef CCX_TIME_IN_MS
     if (stmin_raw <= 0x7FU)
     {
         return (CCX_TIME_VALUE_t)stmin_raw;
     }
     else if (stmin_raw >= 0xF1U && stmin_raw <= 0xF9U)
     {
+        /* Sub-millisecond STmin collapses to 1 ms in ms mode (spec-legal ceiling). */
         return 1U;
     }
     else
     {
+        /* Reserved encodings: ISO 15765-2:2016 says fall back to 127 ms. */
         return 127U;
     }
+#else
+    if (stmin_raw <= 0x7FU)
+    {
+        /* Spec value is in milliseconds; convert to microseconds. */
+        return (CCX_TIME_VALUE_t)stmin_raw * 1000U;
+    }
+    else if (stmin_raw >= 0xF1U && stmin_raw <= 0xF9U)
+    {
+        /* 0xF1..0xF9 = 100..900 us exact. */
+        return (CCX_TIME_VALUE_t)(stmin_raw - 0xF0U) * 100U;
+    }
+    else
+    {
+        /* Reserved: 127 ms fallback, expressed in us. */
+        return 127U * 1000U;
+    }
+#endif
 }
 
 static inline void ISOTP_SendCANMessage(CCX_instance_t *CanInstance, uint32_t ID, uint8_t IDE_flag, const uint8_t *Data,
@@ -649,7 +669,7 @@ static inline void CCX_ISOTP_TX_HandleFlowControl(CCX_ISOTP_TX_t *Instance, cons
     {
     case CCX_ISOTP_FC_CTS:
         Instance->BlockCounter = ISOTP_GetFCBlockSize(msg);
-        Instance->STmin_ms = ISOTP_ConvertSTminToMs(ISOTP_GetFCSTmin(msg));
+        Instance->STmin_ms = ISOTP_ConvertSTminToInternal(ISOTP_GetFCSTmin(msg));
         Instance->State = CCX_ISOTP_TX_STATE_SENDING_CF;
         Instance->LastTick = CCX_GET_TICK;
         Instance->WaitFramesRemaining = Instance->MaxWaitFrames;

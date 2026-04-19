@@ -313,7 +313,7 @@ struct CCX_ISOTP_TX_t
     uint8_t BlockCounter;            /* Counter for BS */
     CCX_TIME_t LastTick;             /* Last activity timestamp */
     uint8_t WaitFramesRemaining;     /* Number of WAIT FC frames we can tolerate */
-    CCX_TIME_VALUE_t STmin_ms;       /* STmin value from FC converted to milliseconds */
+    CCX_TIME_VALUE_t STmin_ms;       /* STmin from FC, cached in internal ticks (ms or us per CCX_TIME_IN_MS) */
     uint8_t ActiveTxDL;              /* Active link-layer payload for TX */
     uint8_t MaxWaitFrames;           /* Effective FC.WAIT tolerance for this instance */
     CCX_ISOTP_LengthFormat_t LengthFormat;
