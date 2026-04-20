@@ -1,6 +1,6 @@
 # CAN CoreX Implementation Guide
 
-**Version:** 2.1.0  
+**Version:** 2.2.0  
 **Author:** Adrian Pietrzak  
 **Date:** April 2026
 
@@ -86,6 +86,45 @@ project/
 - `can_app_msg_tx.c` contains frame **instances** and TX table
 - `can_app_msg_rx.c` contains RX table and parser **implementations**
 - `can_app.c` orchestrates initialization and polling
+
+---
+
+## Timebase Model
+
+CAN CoreX now uses a strict split between the primary and optional high-resolution timebases:
+
+- core CAN RX/TX logic always uses the primary timebase in `ms`
+- ISO-TP uses the primary timebase for `N_As`, `N_Bs`, `N_Cs`, `N_Ar`, `N_Br`, `N_Cr`
+- ISO-TP uses the HR timebase only for sub-millisecond `STmin` values (`0xF1..0xF9`)
+- bus monitoring uses the primary timebase for `successful_run_time` and long recovery delays
+- bus monitoring uses the HR timebase only when recovery delay is configured through `CCX_BUS_RECOVERY_US(x)` and `x <= 3000 us`
+
+Practical rules:
+
+- always register the primary tick source before `CCX_Init()`
+- register the HR tick source only if your build enables HR and you actually use HR-dependent features
+- `CCX_TICK_FROM_FUNC` and `CCX_HR_TICK_FROM_FUNC` are independent
+- allowed custom timebase widths are `uint16_t`, `uint32_t`, `uint64_t`
+- `uint8_t` is rejected because its range is too small for this library
+- old signed timebase selection macros are rejected because they were a historical bug and break timeout arithmetic
+
+Example registration:
+
+```c
+/* Primary tick in milliseconds */
+volatile uint32_t system_tick_ms = 0;
+CCX_tick_variable_register(&system_tick_ms);
+
+/* Optional HR tick in microseconds */
+#ifndef CCX_DISABLE_HIGH_RES_TIMEBASE
+volatile uint32_t system_tick_us = 0;
+CCX_high_res_tick_variable_register(&system_tick_us);
+#endif
+```
+
+If your project uses callback-based tick sources instead of variables, configure
+`CCX_TICK_FROM_FUNC` and `CCX_HR_TICK_FROM_FUNC` independently and register the
+matching callback APIs.
 
 ---
 
@@ -1173,7 +1212,7 @@ void CAN_App_Init(void)
         CAN1_get_bus_state,
         CAN1_get_error_counters,
         CAN1_request_recovery,
-        10,      /* recovery_delay: 10ms between attempts */
+        CCX_BUS_RECOVERY_MS(10), /* recovery_delay: 10ms between attempts */
         60000,   /* successful_run_time: 60s before resetting counter */
         1,       /* auto_recovery_enabled */
         5        /* max_recovery_attempts before grace period */
@@ -1197,7 +1236,7 @@ void CAN_App_Init(void)
         CAN2_get_bus_state,
         CAN2_get_error_counters,
         CAN2_request_recovery,
-        10,
+        CCX_BUS_RECOVERY_MS(10),
         60000,
         1,
         5
@@ -1329,7 +1368,7 @@ CCX_BusMonitor_Init(
     &CAN1_instance, &CAN1_monitor,
     CAN1_get_bus_state, CAN1_get_error_counters,
     CAN_request_recovery_noop,
-    10, 60000,
+    CCX_BUS_RECOVERY_MS(10), 60000,
     0,  /* auto_recovery_enabled = 0 — hardware recovers automatically */
     0
 );
@@ -1913,7 +1952,7 @@ void CAN_App_Init(void)
         FDCAN1_get_bus_state,
         FDCAN1_get_error_counters,
         FDCAN1_request_recovery,
-        10,      /* recovery_delay: 10ms */
+        CCX_BUS_RECOVERY_MS(10), /* recovery_delay: 10ms */
         60000,   /* successful_run_time: 60s */
         1,       /* auto_recovery_enabled */
         5        /* max_recovery_attempts */
@@ -1937,7 +1976,7 @@ void CAN_App_Init(void)
         FDCAN2_get_bus_state,
         FDCAN2_get_error_counters,
         FDCAN2_request_recovery,
-        10,
+        CCX_BUS_RECOVERY_MS(10),
         60000,
         1,
         5
@@ -2708,7 +2747,7 @@ void CAN_App_Init(void)
         CAN_get_bus_state,
         CAN_get_error_counters,
         CAN_request_recovery,
-        10,
+        CCX_BUS_RECOVERY_MS(10),
         60000,
         1,
         5
@@ -3144,6 +3183,10 @@ This implementation guide covers:
 - Current ISO-TP lifecycle helpers include `CCX_ISOTP_TX_Abort()`, `CCX_ISOTP_RX_Abort()`, `OnReceiveStart`, and delta-based `OnReceiveProgress`
 - ISO-TP timeout diagnostics are phase-specific (`TIMEOUT_FC`, `TIMEOUT_CF_TX`, `TIMEOUT_CF_RX`, `WAIT_EXCEEDED`); `CCX_ISOTP_ERROR_TIMEOUT` remains a legacy alias
 - `N_As`, `N_Ar`, and `N_Br` exist in the config structures but are currently informational only; the library enforces `N_Bs`, `N_Cs`, and `N_Cr`
+- Core CAN logic always uses the primary `ms` timebase; ISO-TP uses HR only for sub-millisecond `STmin`
+- Bus monitoring `successful_run_time` is always in primary `ms`; use `CCX_BUS_RECOVERY_MS(...)` / `CCX_BUS_RECOVERY_US(...)` for `recovery_delay`
+- `CCX_BUS_RECOVERY_US(x)` uses HR only for `x <= 3000 us`; above that it falls back to the base `ms` domain
+- Register the HR tick source only when your build enables HR and your configuration actually needs it
 - If hardware auto bus-off recovery is active (bxCAN ABOM, or custom platform feature), use `auto_recovery_enabled = 0` — let hardware recover, use the library only for monitoring
 - `CCX_FD_DLC_TO_LEN[dlc]` converts raw DLC 0–15 to actual byte count; `CCX_FD_LenToDLC(n)` does the reverse
 - Bus monitoring `recovery_delay` should be ≥ the ISO 11898-1 minimum for your nominal bit rate (see `CAN_COREX_BUS_OFF_RECOVERY_*_MS` macros)

@@ -11,7 +11,7 @@
 
 ## Overview
 
-CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, ISO-TP transport protocol, and comprehensive bus health monitoring with automatic error recovery. Version 2.1.0 extends ISO-TP to CAN FD payload transport with configurable `TxDL`, extended single-frame/first-frame length encoding, and payload lengths above `4095` on FD instances. Classic CAN behavior remains unchanged, and RX lookup strategy selection (linear / binary / hash) is still compile-time configurable.
+CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, ISO-TP transport protocol, and comprehensive bus health monitoring with automatic error recovery. Version 2.2.0 keeps CAN FD ISO-TP transport with configurable `TxDL`, extended single-frame/first-frame length encoding, and payload lengths above `4095` on FD instances, while cleaning up timebase semantics: core CAN logic always uses the primary millisecond timebase, ISO-TP uses the primary timebase except for sub-millisecond `STmin`, and bus recovery can selectively use a separate high-resolution timebase when the configured recovery delay is short enough to benefit from it. RX lookup strategy selection (linear / binary / hash) remains compile-time configurable.
 
 ## Table of Contents
 
@@ -45,6 +45,7 @@ CAN CoreX is a lightweight, modular CAN bus communication library designed for e
 - **FD DLC Encoding**: Non-linear DLC 0-15 map (0-8 = same as classic, 9-15 = 12/16/20/24/32/48/64 bytes); `CCX_FD_DLC_t` named constants
 - **Strict Frame-Format Matching**: All RX table entries check `FrameFormat` — a CLASSIC entry will not match an FD frame; `CCX_DLC_ANY` + `FrameFormat` field for format-specific wildcards
 - **Bus Management**: Automatic bus-off detection and recovery with configurable retry strategy
+- **Strict Timebase Contract**: Core CAN logic always uses primary `ms`; HR is separate and only used where it improves timing accuracy
 - **Global Statistics**: Real-time monitoring of RX/TX counters, buffer overflows, and parser calls
 
 ---
@@ -280,16 +281,21 @@ CCX_RX_RebuildHash(&can_instance);
 
 ---
 
-#### `CCX_tick_variable_register`
+#### Primary Tick Registration
 
 ```c
+#if CCX_TICK_FROM_FUNC
+void CCX_tick_function_register(CCX_TIME_BASE_SCALAR (*Function)(void));
+#else
 void CCX_tick_variable_register(CCX_TIME_t *Variable);
+#endif
 ```
 
-**Description**: Registers the system tick variable used for timing.
+**Description**: Registers the primary system tick source used by core CAN RX/TX logic and all base-domain timeouts.
 
 **Parameters**:
-- `Variable`: Pointer to volatile tick counter variable
+- `Function`: Callback returning the current primary tick when `CCX_TICK_FROM_FUNC=1`
+- `Variable`: Pointer to a volatile primary tick variable when `CCX_TICK_FROM_FUNC=0`
 
 **Important**: Must be called BEFORE `CCX_Init()`.
 
@@ -298,6 +304,50 @@ void CCX_tick_variable_register(CCX_TIME_t *Variable);
 volatile uint32_t system_tick_ms = 0;
 CCX_tick_variable_register(&system_tick_ms);
 ```
+
+Or with a callback:
+
+```c
+static uint32_t get_system_tick_ms(void)
+{
+    return system_tick_ms;
+}
+
+CCX_tick_function_register(get_system_tick_ms);
+```
+
+#### High-Resolution Tick Registration
+
+When `CCX_DISABLE_HIGH_RES_TIMEBASE` is **not** defined, HR-aware parts of the library can use a separate high-resolution tick source.
+
+```c
+#if CCX_HR_TICK_FROM_FUNC
+void CCX_high_res_tick_function_register(CCX_HR_TIME_BASE_SCALAR (*Function)(void));
+#else
+void CCX_high_res_tick_variable_register(CCX_HR_TIME_t *Variable);
+#endif
+```
+
+**Important semantics**:
+- `CCX_TICK_FROM_FUNC` and `CCX_HR_TICK_FROM_FUNC` are independent
+- core CAN logic always uses the primary timebase
+- ISO-TP uses HR only for sub-millisecond `STmin` values (`0xF1..0xF9`)
+- bus monitor uses HR only when recovery delay is configured in `us` and the value is `<= 3000 us`
+- `CCX_IsPrimaryTickRegistered()` and `CCX_IsHighResTickRegistered()` expose registration state for tests and diagnostics
+
+#### Timebase Type Configuration
+
+The library supports separate unsigned type selection for the primary and HR timebases:
+
+- primary: `CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT16`, `..._UINT32`, `..._UINT64`
+- HR: `CCX_HR_TIME_BASE_TYPE_CUSTOM_IS_UINT16`, `..._UINT32`, `..._UINT64`
+
+The following are intentionally rejected at compile time:
+
+- `uint8_t` timebases: range is too small for this library
+- signed timebase macros (`..._IS_INT8/16/32/64`): kept only as hard errors because they were an old bug and break timeout arithmetic
+
+If no custom width macro is defined, both domains default to `uint32_t`.
 
 ---
 
@@ -758,6 +808,10 @@ CAN CoreX includes ISO 15765-2 (ISO-TP) for classic CAN and CAN FD transports.
   - classic instances pad to `8`
   - FD instances pad to configured `TxDL`
 - **Timeout Monitoring**: enforced `N_Bs`, `N_Cs`, `N_Cr`; informational `N_As`, `N_Ar`, `N_Br`
+- **Separated Timing Domains**:
+  - `N_As`, `N_Bs`, `N_Cs`, `N_Ar`, `N_Br`, `N_Cr` use the primary `ms` timebase
+  - `STmin` values `0x00..0x7F` use the primary `ms` timebase
+  - `STmin` values `0xF1..0xF9` (100-900 `us`) use the HR timebase when enabled
 - **Lifecycle Hooks**: `OnReceiveStart`, `OnReceiveProgress`, `OnReceiveComplete`, `OnError`
 - **Abort API**: `CCX_ISOTP_TX_Abort()` / `CCX_ISOTP_RX_Abort()`
 - **Separate TX/RX Instances**: Independent transmit and receive handling
@@ -778,6 +832,8 @@ CAN CoreX includes ISO 15765-2 (ISO-TP) for classic CAN and CAN FD transports.
 - If one CF is lost but a later CF arrives before `N_Cr` expires, RX will typically end with `CCX_ISOTP_ERROR_SEQUENCE`, not `CCX_ISOTP_ERROR_TIMEOUT_CF_RX`
 - `OnReceiveStart` fires once after a valid `FF` is accepted and the total payload length is known
 - `CCX_ISOTP_ERROR_TIMEOUT` remains a legacy alias of `CCX_ISOTP_ERROR_TIMEOUT_FC`
+- In dual-timebase builds, sub-millisecond `STmin` requires a registered HR tick source
+- In single-timebase builds (`CCX_DISABLE_HIGH_RES_TIMEBASE`), sub-millisecond `STmin` is rounded up to the primary `ms` tick
 
 ### Basic Usage
 
@@ -1103,7 +1159,7 @@ CCX_ISOTP_RX_Config_t rx_cfg = {
 ### Limitations
 
 - **Normal addressing only**: Extended and Mixed addressing modes not yet implemented
-- **STmin < 1ms**: Submillisecond timing (0xF1-0xF9) parsed but not implemented
+- **Single-timebase builds**: Submillisecond `STmin` values are rounded up to the primary `ms` tick
 
 ---
 
@@ -1253,7 +1309,7 @@ CCX_BusMonitor_Init(
     my_get_bus_state,        // Read state from hardware
     my_get_error_counters,   // Read TEC/REC (optional)
     my_request_recovery,     // Trigger recovery
-    10,      // recovery_delay: 10ms between attempts
+    CCX_BUS_RECOVERY_MS(10), // recovery_delay: 10ms between attempts
     60000,   // successful_run_time: 60s grace period
     1,       // auto_recovery_enabled
     5        // max_recovery_attempts before grace period
@@ -1272,6 +1328,8 @@ bus_monitor.OnErrorCountersUpdate = my_counters_callback;
    - Attempts recovery up to `max_recovery_attempts` times
    - Waits `recovery_delay` between attempts
    - Calls `OnRecoveryAttempt` before each try
+   - Use `CCX_BUS_RECOVERY_MS(x)` for base-domain recovery delays
+   - Use `CCX_BUS_RECOVERY_US(x)` for short delays that should use HR when `x <= 3000 us`
 
 2. **Grace Period:**
    - After max attempts, waits `successful_run_time` before trying again
@@ -1280,6 +1338,12 @@ bus_monitor.OnErrorCountersUpdate = my_counters_callback;
 
 3. **Counter Reset:**
    - After successful operation for `successful_run_time`, attempt counter resets to 0
+
+**Recovery delay selection:**
+- Classic CAN constants up to `250 kbps` use `CCX_BUS_RECOVERY_MS(...)`
+- `500 kbps`, `800 kbps`, `1000 kbps`, and fast FD data-phase constants use `CCX_BUS_RECOVERY_US(...)`
+- `CCX_BUS_RECOVERY_US(x)` uses HR only for `x <= 3000 us`; above that it falls back to base `ms`
+- `successful_run_time` always uses the primary `ms` timebase
 
 **Manual Recovery:**
 ```c
