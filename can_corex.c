@@ -20,11 +20,9 @@
 
 #if CCX_TICK_FROM_FUNC
 
-CCX_TIME_t (*CCX_get_tick)(void) = NULL;
+CCX_TIME_BASE_SCALAR (*CCX_get_tick)(void) = NULL;
 
-#define CCX_GET_TICK ((CCX_get_tick != NULL) ? CCX_get_tick() : ((CCX_TIME_t)0))
-
-void CCX_tick_function_register(CCX_TIME_t (*Function)(void))
+void CCX_tick_function_register(CCX_TIME_BASE_SCALAR (*Function)(void))
 {
     assert(Function != NULL);
 
@@ -35,8 +33,6 @@ void CCX_tick_function_register(CCX_TIME_t (*Function)(void))
 
 CCX_TIME_t *CCX_tick = NULL;
 
-#define CCX_GET_TICK (*(CCX_tick))
-
 void CCX_tick_variable_register(CCX_TIME_t *Variable)
 {
     assert(Variable != NULL);
@@ -45,6 +41,48 @@ void CCX_tick_variable_register(CCX_TIME_t *Variable)
 }
 
 #endif
+
+#ifndef CCX_DISABLE_HIGH_RES_TIMEBASE
+#if CCX_HR_TICK_FROM_FUNC
+CCX_HR_TIME_BASE_SCALAR (*CCX_get_high_res_tick)(void) = NULL;
+
+void CCX_high_res_tick_function_register(CCX_HR_TIME_BASE_SCALAR (*Function)(void))
+{
+    assert(Function != NULL);
+
+    CCX_get_high_res_tick = Function;
+}
+#else
+CCX_HR_TIME_t *CCX_high_res_tick = NULL;
+
+void CCX_high_res_tick_variable_register(CCX_HR_TIME_t *Variable)
+{
+    assert(Variable != NULL);
+
+    CCX_high_res_tick = Variable;
+}
+#endif
+#endif
+
+uint8_t CCX_IsPrimaryTickRegistered(void)
+{
+#if CCX_TICK_FROM_FUNC
+    return (uint8_t)(CCX_get_tick != NULL);
+#else
+    return (uint8_t)(CCX_tick != NULL);
+#endif
+}
+
+uint8_t CCX_IsHighResTickRegistered(void)
+{
+#ifdef CCX_DISABLE_HIGH_RES_TIMEBASE
+    return CCX_IsPrimaryTickRegistered();
+#elif CCX_HR_TICK_FROM_FUNC
+    return (uint8_t)(CCX_get_high_res_tick != NULL);
+#else
+    return (uint8_t)(CCX_high_res_tick != NULL);
+#endif
+}
 
 extern void CCX_net_push(const CCX_instance_t *Instance, const CCX_message_t *msg, uint8_t FromTxFunc);
 
@@ -111,7 +149,7 @@ CCX_Status_t CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
     Instance->RxHead = next_head;
 
     memcpy(&Instance->RxBuf[Instance->RxHead], msg, sizeof(CCX_message_t));
-    Instance->RxReceivedTick[Instance->RxHead] = CCX_GET_TICK;
+    Instance->RxReceivedTick[Instance->RxHead] = CCX_GetPrimaryTick();
 
     Instance->GlobalStats.total_rx_messages++; /* Increment RX counter (v1.3.0) */
 
@@ -304,9 +342,9 @@ static inline void CCX_Timeout_Check(CCX_instance_t *Instance)
         for (uint16_t i = 0; i < Instance->RxTableSize; i++)
         {
             if ((0 != Instance->CCX_RX_table[i].TimeOut) &&
-                (CCX_GET_TICK - Instance->CCX_RX_table[i].LastTick >= Instance->CCX_RX_table[i].TimeOut))
+                (CCX_GetPrimaryTick() - Instance->CCX_RX_table[i].LastTick >= Instance->CCX_RX_table[i].TimeOut))
             {
-                Instance->CCX_RX_table[i].LastTick = CCX_GET_TICK;
+                Instance->CCX_RX_table[i].LastTick = CCX_GetPrimaryTick();
                 if (NULL != Instance->CCX_RX_table[i].TimeoutCallback)
                 {
                     Instance->GlobalStats.timeout_calls_count++; /* Track timeout calls (v1.3.0) */
@@ -392,9 +430,9 @@ static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
 
     for (uint16_t i = 0; i < Instance->TxTableSize; i++)
     {
-        if (CCX_GET_TICK - Instance->CCX_TX_table[i].LastTick >= Instance->CCX_TX_table[i].SendFreq)
+        if (CCX_GetPrimaryTick() - Instance->CCX_TX_table[i].LastTick >= Instance->CCX_TX_table[i].SendFreq)
         {
-            Instance->CCX_TX_table[i].LastTick = CCX_GET_TICK;
+            Instance->CCX_TX_table[i].LastTick = CCX_GetPrimaryTick();
 
 #if CCX_ENABLE_CANFD
             CCX_frame_format_t table_fmt = Instance->CCX_TX_table[i].FrameFormat;
@@ -498,7 +536,7 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
         Instance->RxReceivedTick[i] = 0;
     }
 
-    CCX_TIME_t current_tick = CCX_GET_TICK;
+    CCX_TIME_t current_tick = CCX_GetPrimaryTick();
 
     if (Instance->CCX_RX_table != NULL)
     {
@@ -589,9 +627,9 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
         if (new_state == CCX_BUS_STATE_OFF)
         {
             mon->stats.bus_off_count++;
-            mon->bus_off_entry_time = CCX_GET_TICK;
-            mon->recovery_start_time = CCX_GET_TICK;
-            mon->stats.last_bus_off_time = CCX_GET_TICK;
+            mon->bus_off_entry_time = CCX_GetHighResTick();
+            mon->recovery_start_time = CCX_GetHighResTick();
+            mon->stats.last_bus_off_time = CCX_GetHighResTick();
 
             /* Only reset attempts if not in grace period */
             if (!mon->in_grace_period)
@@ -610,8 +648,8 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
         else if (new_state == CCX_BUS_STATE_ACTIVE && old_state == CCX_BUS_STATE_OFF)
         {
             /* Successful recovery from bus-off */
-            mon->stats.total_bus_off_duration += (CCX_GET_TICK - mon->bus_off_entry_time);
-            mon->last_successful_recovery = CCX_GET_TICK;
+            mon->stats.total_bus_off_duration += (CCX_GetHighResTick() - mon->bus_off_entry_time);
+            mon->last_successful_recovery = CCX_GetHighResTick();
             mon->in_grace_period = 0; /* Exit grace period */
         }
 
@@ -628,14 +666,14 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
         /* Check if in grace period after failed recovery */
         if (mon->in_grace_period)
         {
-            CCX_TIME_t grace_elapsed = CCX_GET_TICK - mon->grace_period_start;
+            CCX_HR_TIME_t grace_elapsed = CCX_GetHighResTick() - mon->grace_period_start;
 
             if (grace_elapsed >= mon->successful_run_time)
             {
                 /* Grace period expired - try again */
                 mon->recovery_attempts = 0; /* Reset counter */
                 mon->in_grace_period = 0;
-                mon->recovery_start_time = CCX_GET_TICK;
+                mon->recovery_start_time = CCX_GetHighResTick();
 
                 /* Trigger recovery immediately */
                 mon->recovery_attempts++;
@@ -652,7 +690,7 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
             /* Normal auto-recovery mode */
             if (mon->auto_recovery_enabled)
             {
-                CCX_TIME_t time_in_bus_off = CCX_GET_TICK - mon->recovery_start_time;
+                CCX_HR_TIME_t time_in_bus_off = CCX_GetHighResTick() - mon->recovery_start_time;
 
                 if (time_in_bus_off >= mon->recovery_delay)
                 {
@@ -667,7 +705,7 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
                             mon->OnRecoveryAttempt(Instance, mon->recovery_attempts, mon->UserData);
                         }
 
-                        mon->recovery_start_time = CCX_GET_TICK;
+                        mon->recovery_start_time = CCX_GetHighResTick();
                     }
                     else
                     {
@@ -678,7 +716,7 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
                         }
 
                         mon->in_grace_period = 1;
-                        mon->grace_period_start = CCX_GET_TICK;
+                        mon->grace_period_start = CCX_GetHighResTick();
                     }
                 }
             }
@@ -688,7 +726,7 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
     /* Reset recovery counter after successful run time (when ACTIVE) */
     if (new_state == CCX_BUS_STATE_ACTIVE && mon->recovery_attempts > 0)
     {
-        CCX_TIME_t time_since_recovery = CCX_GET_TICK - mon->last_successful_recovery;
+        CCX_HR_TIME_t time_since_recovery = CCX_GetHighResTick() - mon->last_successful_recovery;
 
         if (time_since_recovery >= mon->successful_run_time)
         {
@@ -700,14 +738,22 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
 CCX_Status_t CCX_BusMonitor_Init(CCX_instance_t *Instance, CCX_BusMonitor_t *Monitor,
                                  CCX_BusState_t (*GetBusState)(const CCX_instance_t *),
                                  void (*GetErrorCounters)(const CCX_instance_t *, CCX_ErrorCounters_t *),
-                                 void (*RequestRecovery)(const CCX_instance_t *), CCX_TIME_t recovery_delay,
-                                 CCX_TIME_t successful_run_time, uint8_t auto_recovery_enabled,
+                                 void (*RequestRecovery)(const CCX_instance_t *), CCX_HR_TIME_t recovery_delay,
+                                 CCX_HR_TIME_t successful_run_time, uint8_t auto_recovery_enabled,
                                  uint8_t max_recovery_attempts)
 {
     if (Instance == NULL || Monitor == NULL || GetBusState == NULL || RequestRecovery == NULL)
     {
         return CCX_NULL_PTR;
     }
+
+#ifndef CCX_DISABLE_HIGH_RES_TIMEBASE
+    if (!CCX_IsHighResTickRegistered())
+    {
+        memset(Monitor, 0, sizeof(CCX_BusMonitor_t));
+        return CCX_MISSING_TIMEBASE;
+    }
+#endif
 
     /* Initialize monitor structure */
     memset(Monitor, 0, sizeof(CCX_BusMonitor_t));
@@ -755,7 +801,7 @@ CCX_Status_t CCX_BusMonitor_TriggerRecovery(CCX_instance_t *Instance)
     /* Manual recovery resets everything */
     mon->recovery_attempts = 0;
     mon->in_grace_period = 0;
-    mon->recovery_start_time = CCX_GET_TICK;
+    mon->recovery_start_time = CCX_GetHighResTick();
 
     /* Trigger first attempt */
     mon->recovery_attempts++;

@@ -130,6 +130,7 @@ typedef enum
     CCX_ISOTP_ERROR_WAIT_EXCEEDED, /* Too many `FC.WAIT` frames received */
     CCX_ISOTP_ERROR_TIMEOUT_CF_TX, /* Timeout while scheduling/sending next CF (`N_Cs`) */
     CCX_ISOTP_ERROR_TIMEOUT_CF_RX, /* Timeout while waiting for next received CF (`N_Cr`) */
+    CCX_ISOTP_ERROR_MISSING_TIMEBASE,
 #if CCX_ENABLE_CANFD
     CCX_ISOTP_ERROR_FD_NOT_SUPPORTED, /* Reserved for legacy compatibility */
 #endif
@@ -211,9 +212,9 @@ typedef struct
 #endif
     uint8_t BS;                  /* Block Size: number of CF before expecting FC (0 = no limit) */
     uint8_t STmin;               /* Separation Time minimum (0-127ms or 0xF1-0xF9 for 100-900us) */
-    CCX_TIME_t N_As;             /* Informational timeout for TX of SF/FF/CF; not enforced internally */
-    CCX_TIME_t N_Bs;             /* Timeout for reception of FC after FF/CF (default: 1000ms) */
-    CCX_TIME_t N_Cs;             /* Timeout between CF transmissions (default: 1000ms) */
+    CCX_TIME_t N_As;             /* Informational timeout for TX of SF/FF/CF in base ticks; not enforced internally */
+    CCX_TIME_t N_Bs;             /* Timeout for reception of FC after FF/CF in base ticks */
+    CCX_TIME_t N_Cs;             /* Timeout between CF transmissions in base ticks */
     uint8_t MaxWaitFrames;       /* Number of FC.WAIT frames tolerated before aborting (0 = default 10) */
     CCX_ISOTP_Padding_t Padding; /* Padding configuration */
 
@@ -279,9 +280,9 @@ typedef struct
 #endif
     uint8_t BS;                  /* Block Size to request in FC (0 = no limit) */
     uint8_t STmin;               /* Separation Time minimum to request in FC */
-    CCX_TIME_t N_Ar;             /* Informational timeout for RX of SF/FF/CF; not enforced internally */
-    CCX_TIME_t N_Br;             /* Informational timeout for FC transmission after FF/CF; not enforced internally */
-    CCX_TIME_t N_Cr;             /* Timeout between received CF (default: 1000ms). Detects silence, not correctness: if a later CF arrives before `N_Cr` expires, RX may fail with `CCX_ISOTP_ERROR_SEQUENCE` instead of `CCX_ISOTP_ERROR_TIMEOUT_CF_RX` */
+    CCX_TIME_t N_Ar;             /* Informational timeout for RX of SF/FF/CF in base ticks; not enforced internally */
+    CCX_TIME_t N_Br;             /* Informational timeout for FC transmission after FF/CF in base ticks; not enforced internally */
+    CCX_TIME_t N_Cr;             /* Timeout between received CF in base ticks. Detects silence, not correctness: if a later CF arrives before `N_Cr` expires, RX may fail with `CCX_ISOTP_ERROR_SEQUENCE` instead of `CCX_ISOTP_ERROR_TIMEOUT_CF_RX` */
     CCX_ISOTP_Padding_t Padding; /* Padding configuration */
 
     uint8_t *RxBuffer;                           /* Buffer for received data */
@@ -311,11 +312,15 @@ struct CCX_ISOTP_TX_t
     CCX_ISOTP_Length_t TxDataOffset; /* Current offset in TxData */
     uint8_t SequenceNumber;          /* CF sequence number (0-15) */
     uint8_t BlockCounter;            /* Counter for BS */
-    CCX_TIME_t LastTick;             /* Last activity timestamp */
+    CCX_TIME_t LastTick;             /* Last activity timestamp in base ticks */
+    CCX_HR_TIME_t LastHighResTick;   /* Last CF scheduling timestamp for sub-millisecond STmin */
     uint8_t WaitFramesRemaining;     /* Number of WAIT FC frames we can tolerate */
-    CCX_TIME_VALUE_t STmin_ms;       /* STmin from FC, cached in internal ticks (ms or us per CCX_TIME_IN_MS) */
+    CCX_TIME_t STminTicks;           /* STmin value from FC converted to base ticks */
+    CCX_HR_TIME_t STminHighResTicks; /* STmin value from FC converted to HR ticks when sub-millisecond */
+    uint8_t STminUsesHighRes;        /* 1 when STmin must be enforced in HR domain */
     uint8_t ActiveTxDL;              /* Active link-layer payload for TX */
     uint8_t MaxWaitFrames;           /* Effective FC.WAIT tolerance for this instance */
+    uint8_t InitValid;               /* Successful init state */
     CCX_ISOTP_LengthFormat_t LengthFormat;
 };
 
@@ -331,9 +336,10 @@ struct CCX_ISOTP_RX_t
     CCX_ISOTP_Length_t RxDataOffset;         /* Current offset in RxBuffer */
     uint8_t SequenceNumber;                  /* Expected CF sequence number (0-15) */
     uint8_t BlockCounter;                    /* Counter for BS */
-    CCX_TIME_t LastTick;                     /* Last activity timestamp */
+    CCX_TIME_t LastTick;                     /* Last activity timestamp in base ticks */
     CCX_ISOTP_Length_t LastProgressCallback; /* Offset at last progress callback */
     uint8_t ActiveRxDL;                      /* CAN_DL announced by FF */
+    uint8_t InitValid;                       /* Successful init state */
     CCX_ISOTP_LengthFormat_t LengthFormat;
 };
 

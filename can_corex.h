@@ -27,6 +27,16 @@
 #endif
 
 /**
+ * @def CCX_HR_TICK_FROM_FUNC
+ * @brief Enables high-resolution tick retrieval via a function call.
+ *
+ * This switch is independent from `CCX_TICK_FROM_FUNC`.
+ */
+#ifndef CCX_HR_TICK_FROM_FUNC
+#define CCX_HR_TICK_FROM_FUNC 0
+#endif
+
+/**
  * @def CCX_RX_BUFFER_SIZE
  * @brief Size of the CAN receive buffer.
  *
@@ -93,119 +103,125 @@
 #endif
 
 /* ============================================================
+ * Time base type configuration
+ *
+ * Primary time base:
+ *   - used by core CAN RX/TX logic
+ *   - expressed by CCX_TIME_t / CCX_MAX_TIMEOUT
+ *   - public unit is always milliseconds
+ *
+ * High-resolution time base:
+ *   - used by HR-aware modules such as ISO-TP and bus monitor
+ *   - expressed by CCX_HR_TIME_t / CCX_HR_MAX_TIMEOUT
+ *   - public unit is microseconds when HR is enabled
+ *   - public unit falls back to milliseconds when HR is disabled
+ *
+ * Configuration is width-based and unsigned only.
+ * Signed tick types are intentionally not supported because the library relies
+ * on wraparound subtraction for timeout arithmetic.
+ *
+ * If no custom width macro is defined, uint32_t is used by default.
+ * ============================================================ */
+
+#ifdef CCX_TIME_BASE_TYPE_CUSTOM
+#error                                                                                                                 \
+    "CCX_TIME_BASE_TYPE_CUSTOM is no longer supported. Define exactly one of CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT8/16/32/64."
+#endif
+
+#ifdef CCX_HR_TIME_BASE_TYPE_CUSTOM
+#error                                                                                                                 \
+    "CCX_HR_TIME_BASE_TYPE_CUSTOM is no longer supported. Define exactly one of CCX_HR_TIME_BASE_TYPE_CUSTOM_IS_UINT8/16/32/64."
+#endif
+
+#if defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT8)
+typedef volatile uint8_t CCX_TIME_t;
+#define CCX_TIME_BASE_SCALAR uint8_t
+#define CCX_MAX_TIMEOUT UINT8_MAX
+#elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT16)
+typedef volatile uint16_t CCX_TIME_t;
+#define CCX_TIME_BASE_SCALAR uint16_t
+#define CCX_MAX_TIMEOUT UINT16_MAX
+#elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT32)
+typedef volatile uint32_t CCX_TIME_t;
+#define CCX_TIME_BASE_SCALAR uint32_t
+#define CCX_MAX_TIMEOUT UINT32_MAX
+#elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT64)
+typedef volatile uint64_t CCX_TIME_t;
+#define CCX_TIME_BASE_SCALAR uint64_t
+#define CCX_MAX_TIMEOUT UINT64_MAX
+#else
+typedef volatile uint32_t CCX_TIME_t;
+#define CCX_TIME_BASE_SCALAR uint32_t
+#define CCX_MAX_TIMEOUT UINT32_MAX
+#endif
+
+#ifndef CCX_DISABLE_HIGH_RES_TIMEBASE
+
+#if defined(CCX_HR_TIME_BASE_TYPE_CUSTOM_IS_UINT8)
+typedef volatile uint8_t CCX_HR_TIME_t;
+#define CCX_HR_TIME_BASE_SCALAR uint8_t
+#define CCX_HR_MAX_TIMEOUT UINT8_MAX
+#elif defined(CCX_HR_TIME_BASE_TYPE_CUSTOM_IS_UINT16)
+typedef volatile uint16_t CCX_HR_TIME_t;
+#define CCX_HR_TIME_BASE_SCALAR uint16_t
+#define CCX_HR_MAX_TIMEOUT UINT16_MAX
+#elif defined(CCX_HR_TIME_BASE_TYPE_CUSTOM_IS_UINT32)
+typedef volatile uint32_t CCX_HR_TIME_t;
+#define CCX_HR_TIME_BASE_SCALAR uint32_t
+#define CCX_HR_MAX_TIMEOUT UINT32_MAX
+#elif defined(CCX_HR_TIME_BASE_TYPE_CUSTOM_IS_UINT64)
+typedef volatile uint64_t CCX_HR_TIME_t;
+#define CCX_HR_TIME_BASE_SCALAR uint64_t
+#define CCX_HR_MAX_TIMEOUT UINT64_MAX
+#else
+typedef volatile uint32_t CCX_HR_TIME_t;
+#define CCX_HR_TIME_BASE_SCALAR uint32_t
+#define CCX_HR_MAX_TIMEOUT UINT32_MAX
+#endif
+
+#else
+
+typedef CCX_TIME_t CCX_HR_TIME_t;
+#define CCX_HR_TIME_BASE_SCALAR CCX_TIME_BASE_SCALAR
+#define CCX_HR_MAX_TIMEOUT CCX_MAX_TIMEOUT
+
+#endif
+
+#define CCX_INTERNAL_MS_FROM_US_CEIL(us) (((us) == 0U) ? 0U : (((us)-1U) / 1000U) + 1U)
+
+#ifdef CCX_DISABLE_HIGH_RES_TIMEBASE
+#define CCX_HR_TIME(us) ((CCX_HR_TIME_t)CCX_INTERNAL_MS_FROM_US_CEIL(us))
+#else
+#define CCX_HR_TIME(us) ((CCX_HR_TIME_t)(us))
+#endif
+
+/* ============================================================
  * ISO 11898-1 BUS-OFF recovery timing
  *
  * Condition:
  *   128 x 11 recessive bits = 1408 bits
  *
- * Time is bitrate dependent.
- * Values are CEILED to integer milliseconds, then wrapped in
- * CCX_TIME(us) so they resolve to ms (CCX_TIME_IN_MS) or us.
+ * All constants are expressed in microseconds and converted through
+ * CCX_HR_TIME(us) so they preserve precision with HR and round up to
+ * milliseconds in single-timebase builds.
  * The _MS suffix is kept for API stability.
  * ============================================================ */
 
-#define CAN_COREX_BUS_OFF_RECOVERY_10KBPS_MS CCX_TIME(141U * 1000U)
-#define CAN_COREX_BUS_OFF_RECOVERY_20KBPS_MS CCX_TIME(71U * 1000U)
-#define CAN_COREX_BUS_OFF_RECOVERY_50KBPS_MS CCX_TIME(29U * 1000U)
-#define CAN_COREX_BUS_OFF_RECOVERY_83K3BPS_MS CCX_TIME(17U * 1000U)
-#define CAN_COREX_BUS_OFF_RECOVERY_100KBPS_MS CCX_TIME(15U * 1000U)
-#define CAN_COREX_BUS_OFF_RECOVERY_125KBPS_MS CCX_TIME(12U * 1000U)
-#define CAN_COREX_BUS_OFF_RECOVERY_250KBPS_MS CCX_TIME(6U * 1000U)
-#define CAN_COREX_BUS_OFF_RECOVERY_500KBPS_MS CCX_TIME(3U * 1000U)
-#define CAN_COREX_BUS_OFF_RECOVERY_800KBPS_MS CCX_TIME(2U * 1000U)
-#define CAN_COREX_BUS_OFF_RECOVERY_1000KBPS_MS CCX_TIME(2U * 1000U)
+#define CAN_COREX_BUS_OFF_RECOVERY_10KBPS_MS CCX_HR_TIME(141000U)
+#define CAN_COREX_BUS_OFF_RECOVERY_20KBPS_MS CCX_HR_TIME(71000U)
+#define CAN_COREX_BUS_OFF_RECOVERY_50KBPS_MS CCX_HR_TIME(29000U)
+#define CAN_COREX_BUS_OFF_RECOVERY_83K3BPS_MS CCX_HR_TIME(17000U)
+#define CAN_COREX_BUS_OFF_RECOVERY_100KBPS_MS CCX_HR_TIME(15000U)
+#define CAN_COREX_BUS_OFF_RECOVERY_125KBPS_MS CCX_HR_TIME(12000U)
+#define CAN_COREX_BUS_OFF_RECOVERY_250KBPS_MS CCX_HR_TIME(6000U)
+#define CAN_COREX_BUS_OFF_RECOVERY_500KBPS_MS CCX_HR_TIME(3000U)
+#define CAN_COREX_BUS_OFF_RECOVERY_800KBPS_MS CCX_HR_TIME(2000U)
+#define CAN_COREX_BUS_OFF_RECOVERY_1000KBPS_MS CCX_HR_TIME(2000U)
 
 #if CCX_ENABLE_CANFD
-/* CAN FD data-phase bus-off recovery (128 x 11 recessive bits, ceil to ms) */
-#define CAN_COREX_BUS_OFF_RECOVERY_FD_2M_MS CCX_TIME(1U * 1000U)
-#define CAN_COREX_BUS_OFF_RECOVERY_FD_5M_MS CCX_TIME(1U * 1000U)
-#define CAN_COREX_BUS_OFF_RECOVERY_FD_8M_MS CCX_TIME(1U * 1000U)
-#endif
-
-/**
- * @brief System time base type and maximum timeout definition.
- *
- * By default, the system tick type is `volatile uint32_t`.
- * If you want to use a different type, define `CC_TIME_BASE_TYPE_CUSTOM` as that type
- * and also define the corresponding `_IS_` macro
- * (e.g., `CC_TIME_BASE_TYPE_CUSTOM_IS_UINT16`) to properly set `CC_MAX_TIMEOUT`.
- */
-#ifndef CCX_TIME_BASE_TYPE_CUSTOM
-
-#define CCX_MAX_TIMEOUT UINT32_MAX
-typedef volatile uint32_t CCX_TIME_t;
-typedef uint32_t CCX_TIME_VALUE_t; /* Non-volatile variant for values (not references) */
-
-#else
-
-typedef CCX_TIME_BASE_TYPE_CUSTOM CCX_TIME_t;
-
-#if defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT8)
-typedef uint8_t CCX_TIME_VALUE_t;
-#define CCX_MAX_TIMEOUT UINT8_MAX
-#elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT16)
-typedef uint16_t CCX_TIME_VALUE_t;
-#define CCX_MAX_TIMEOUT UINT16_MAX
-#elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT32)
-typedef uint32_t CCX_TIME_VALUE_t;
-#define CCX_MAX_TIMEOUT UINT32_MAX
-#elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT64)
-typedef uint64_t CCX_TIME_VALUE_t;
-#define CCX_MAX_TIMEOUT UINT64_MAX
-#elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_INT8)
-typedef int8_t CCX_TIME_VALUE_t;
-#define CCX_MAX_TIMEOUT INT8_MAX
-#elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_INT16)
-typedef int16_t CCX_TIME_VALUE_t;
-#define CCX_MAX_TIMEOUT INT16_MAX
-#elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_INT32)
-typedef int32_t CCX_TIME_VALUE_t;
-#define CCX_MAX_TIMEOUT INT32_MAX
-#elif defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_INT64)
-typedef int64_t CCX_TIME_VALUE_t;
-#define CCX_MAX_TIMEOUT INT64_MAX
-#else
-#error "CCX_MAX_TIMEOUT: Unknown CCX_TIME_BASE_TYPE_CUSTOM or missing _IS_* define"
-#endif
-
-#endif
-
-/**
- * @def CCX_TIME_IN_MS
- * @brief Selects millisecond time resolution (legacy, v2.1.x-compatible).
- *
- * When defined, the library operates on millisecond ticks: CCX_TIME(us) scales
- * microsecond constants down by 1000 with ceiling rounding, and the registered
- * tick variable/function is expected to count milliseconds.
- *
- * When undefined (default since v2.2), the library operates on microsecond
- * ticks, enabling sub-millisecond ISO 15765-2 STmin (0xF1..0xF9 -> 100..900 us)
- * and high-resolution transfer timeouts. The registered tick source must then
- * count microseconds.
- */
-/* #define CCX_TIME_IN_MS */
-
-/**
- * @def CCX_TIME(us)
- * @brief Compile-time conversion of a microsecond constant to internal ticks.
- *
- * In us mode this is the identity mapping. In ms mode this is ceiling division
- * by 1000: zero input yields zero (preserving "0 = disabled" semantics for
- * timeout fields), and any non-zero input rounds up to at least 1 ms so a
- * configured delay never collapses to an immediate timeout.
- *
- * Example:
- *   .N_Bs  = CCX_TIME(1000000U),   // 1 s in either mode
- *   .N_Cs  = CCX_TIME(500U),       //   1 ms in ms mode,  500 us in us mode
- *
- * @note The input expression is evaluated up to three times in ms mode; pass
- *       compile-time constants or plain variables. For literal constants the
- *       whole expression folds to a single integer at compile time.
- */
-#ifdef CCX_TIME_IN_MS
-#define CCX_TIME(us) (((us) == 0U) ? 0U : ((us) / 1000U) + (((us) % 1000U) ? 1U : 0U))
-#else
-#define CCX_TIME(us) (us)
+#define CAN_COREX_BUS_OFF_RECOVERY_FD_2M_MS CCX_HR_TIME(704U)
+#define CAN_COREX_BUS_OFF_RECOVERY_FD_5M_MS CCX_HR_TIME(282U)
+#define CAN_COREX_BUS_OFF_RECOVERY_FD_8M_MS CCX_HR_TIME(176U)
 #endif
 
 /**
@@ -330,7 +346,8 @@ typedef enum
     CCX_OK = 0,
     CCX_NULL_PTR,
     CCX_WRONG_ARG,
-    CCX_BUS_TOO_BUSY
+    CCX_BUS_TOO_BUSY,
+    CCX_MISSING_TIMEBASE
 } CCX_Status_t;
 
 /**
@@ -371,8 +388,8 @@ typedef struct
     uint32_t bus_off_count;                  /**< Number of bus-off events */
     uint32_t error_warning_count;            /**< Number of error warning events (TEC/REC > 96) */
     uint32_t error_passive_count;            /**< Number of error passive events (TEC/REC > 127) */
-    CCX_TIME_t last_bus_off_time;            /**< Timestamp of last bus-off occurrence */
-    CCX_TIME_t total_bus_off_duration;       /**< Cumulative time spent in bus-off state (ms) */
+    CCX_HR_TIME_t last_bus_off_time;         /**< Timestamp of last bus-off occurrence */
+    CCX_HR_TIME_t total_bus_off_duration;    /**< Cumulative time spent in bus-off state */
     CCX_ErrorCounters_t error_counters;      /**< Current TEC/REC values from hardware */
     CCX_ErrorCounters_t peak_error_counters; /**< Peak TEC/REC values since initialization */
 } CCX_BusStats_t;
@@ -411,19 +428,18 @@ typedef struct
     CCX_BusStats_t stats;         /**< Accumulated statistics */
 
     /* Recovery parameters */
-    CCX_TIME_t recovery_delay;      /**< Delay between recovery attempts (ms, default: 10) Minimum in macros
-                                       CAN_COREX_BUS_OFF_RECOVERY_*_MS*/
-    CCX_TIME_t successful_run_time; /**< Time to run successfully before resetting counter (ms, default: 60000) */
-    uint8_t auto_recovery_enabled;  /**< Enable automatic bus-off recovery */
-    uint8_t max_recovery_attempts;  /**< Max attempts before grace period (0 = unlimited) */
-    uint8_t recovery_attempts;      /**< Current recovery attempt counter */
+    CCX_HR_TIME_t recovery_delay;      /**< Delay between recovery attempts. Unit: us with HR, ms without HR. */
+    CCX_HR_TIME_t successful_run_time; /**< Time to run successfully before resetting counter */
+    uint8_t auto_recovery_enabled;     /**< Enable automatic bus-off recovery */
+    uint8_t max_recovery_attempts;     /**< Max attempts before grace period (0 = unlimited) */
+    uint8_t recovery_attempts;         /**< Current recovery attempt counter */
 
     /* Internal state */
-    CCX_TIME_t recovery_start_time;      /**< When current recovery cycle started */
-    CCX_TIME_t last_successful_recovery; /**< When last recovery succeeded */
-    CCX_TIME_t bus_off_entry_time;       /**< When bus-off state was entered */
-    uint8_t in_grace_period;             /**< 1 = waiting in grace period after max attempts */
-    CCX_TIME_t grace_period_start;       /**< When grace period started */
+    CCX_HR_TIME_t recovery_start_time;      /**< When current recovery cycle started */
+    CCX_HR_TIME_t last_successful_recovery; /**< When last recovery succeeded */
+    CCX_HR_TIME_t bus_off_entry_time;       /**< When bus-off state was entered */
+    uint8_t in_grace_period;                /**< 1 = waiting in grace period after max attempts */
+    CCX_HR_TIME_t grace_period_start;       /**< When grace period started */
 
     /* Hardware interface - user implements these */
     CCX_BusState_t (*GetBusState)(const CCX_instance_t *Instance); /**< Read bus state from hardware */
@@ -469,7 +485,7 @@ typedef struct
  *         .DLC = 8,
  *         .IDE_flag = 0,
  *         .UserData = &msg_ctx,
- *         .TimeOut = CCX_TIME(1000U * 1000U),
+ *         .TimeOut = 1000,
  *         .Parser = rpm_parser,
  *         .TimeoutCallback = rpm_timeout
  *     }
@@ -525,7 +541,7 @@ typedef struct
  *         .DLC = 8,
  *         .IDE_flag = 0,
  *         .UserData = &temp_ctx,
- *         .SendFreq = CCX_TIME(100U * 1000U),  // Send every 100ms
+ *         .SendFreq = 100,  // Send every 100ms
  *         .Parser = temp_tx_parser
  *     }
  * };
@@ -591,11 +607,8 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
  * function that returns the current system tick value.
  *
  * @param Function Pointer to a function that returns the current system tick (CCX_TIME_t).
- *
- * @note The tick unit must match the selected time resolution: milliseconds if
- *       CCX_TIME_IN_MS is defined, microseconds otherwise.
  */
-void CCX_tick_function_register(CCX_TIME_t (*Function)(void));
+void CCX_tick_function_register(CCX_TIME_BASE_SCALAR (*Function)(void));
 #else
 /**
  * @brief Registers the system tick source variable.
@@ -604,11 +617,39 @@ void CCX_tick_function_register(CCX_TIME_t (*Function)(void));
  * to a variable that holds the current system tick value.
  *
  * @param Variable Pointer to a volatile variable of type CCX_TIME_t representing the system tick.
- *
- * @note The tick unit must match the selected time resolution: milliseconds if
- *       CCX_TIME_IN_MS is defined, microseconds otherwise.
  */
 void CCX_tick_variable_register(CCX_TIME_t *Variable);
+#endif
+
+#ifndef CCX_DISABLE_HIGH_RES_TIMEBASE
+#if CCX_HR_TICK_FROM_FUNC
+void CCX_high_res_tick_function_register(CCX_HR_TIME_BASE_SCALAR (*Function)(void));
+#else
+void CCX_high_res_tick_variable_register(CCX_HR_TIME_t *Variable);
+#endif
+#endif
+
+uint8_t CCX_IsPrimaryTickRegistered(void);
+uint8_t CCX_IsHighResTickRegistered(void);
+
+#if CCX_TICK_FROM_FUNC
+extern CCX_TIME_BASE_SCALAR (*CCX_get_tick)(void);
+#define CCX_GetPrimaryTick() ((CCX_get_tick != NULL) ? (CCX_TIME_t)CCX_get_tick() : ((CCX_TIME_t)0))
+#else
+extern CCX_TIME_t *CCX_tick;
+#define CCX_GetPrimaryTick() ((CCX_tick != NULL) ? (*CCX_tick) : ((CCX_TIME_t)0))
+#endif
+
+#ifdef CCX_DISABLE_HIGH_RES_TIMEBASE
+#define CCX_GetHighResTick() ((CCX_HR_TIME_t)CCX_GetPrimaryTick())
+#else
+#if CCX_HR_TICK_FROM_FUNC
+extern CCX_HR_TIME_BASE_SCALAR (*CCX_get_high_res_tick)(void);
+#define CCX_GetHighResTick() ((CCX_get_high_res_tick != NULL) ? (CCX_HR_TIME_t)CCX_get_high_res_tick() : ((CCX_HR_TIME_t)0))
+#else
+extern CCX_HR_TIME_t *CCX_high_res_tick;
+#define CCX_GetHighResTick() ((CCX_high_res_tick != NULL) ? (*CCX_high_res_tick) : ((CCX_HR_TIME_t)0))
+#endif
 #endif
 
 /* ========================================================================
@@ -628,10 +669,8 @@ void CCX_tick_variable_register(CCX_TIME_t *Variable);
  * @param GetBusState Function to read current bus state from hardware (required)
  * @param GetErrorCounters Function to read TEC/REC from hardware (optional, can be NULL)
  * @param RequestRecovery Function to trigger bus-off recovery in hardware (required)
- * @param recovery_delay Delay between recovery attempts in internal ticks
- *        (use CCX_TIME(10000U) for the ISO-recommended 10 ms minimum)
- * @param successful_run_time Time to run successfully before resetting the
- *        recovery counter in internal ticks (use CCX_TIME(60000000U) for 60 s)
+ * @param recovery_delay Delay between recovery attempts in HR-aware ticks
+ * @param successful_run_time Time to run successfully before resetting recovery counter in HR-aware ticks
  * @param auto_recovery_enabled 1 = enable automatic recovery, 0 = manual recovery only
  * @param max_recovery_attempts Maximum recovery attempts before entering grace period (0 = unlimited)
  * @return CCX_OK on success, CCX_NULL_PTR if Instance/Monitor/callbacks are NULL
@@ -642,15 +681,15 @@ void CCX_tick_variable_register(CCX_TIME_t *Variable);
  * @code
  * CCX_BusMonitor_t bus_monitor;
  * CCX_BusMonitor_Init(&can_inst, &bus_monitor, my_get_state, my_get_tec_rec,
- *                     my_recovery, CCX_TIME(10000U), CCX_TIME(60000000U), 1, 5);
+ *                     my_recovery, 10, 60000, 1, 5);
  * bus_monitor.OnBusStateChange = my_callback;
  * @endcode
  */
 CCX_Status_t CCX_BusMonitor_Init(CCX_instance_t *Instance, CCX_BusMonitor_t *Monitor,
                                  CCX_BusState_t (*GetBusState)(const CCX_instance_t *),
                                  void (*GetErrorCounters)(const CCX_instance_t *, CCX_ErrorCounters_t *),
-                                 void (*RequestRecovery)(const CCX_instance_t *), CCX_TIME_t recovery_delay,
-                                 CCX_TIME_t successful_run_time, uint8_t auto_recovery_enabled,
+                                 void (*RequestRecovery)(const CCX_instance_t *), CCX_HR_TIME_t recovery_delay,
+                                 CCX_HR_TIME_t successful_run_time, uint8_t auto_recovery_enabled,
                                  uint8_t max_recovery_attempts);
 
 /**

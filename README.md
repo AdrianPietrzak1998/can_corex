@@ -1,7 +1,7 @@
 # CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-2.2.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-2.1.0-blue.svg)](CHANGELOG.md)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
 [![Tests](https://img.shields.io/badge/Tests-340--344%20classic%20%7C%20516--527%20FD%20passing-success.svg)]()
@@ -11,7 +11,7 @@
 
 ## Overview
 
-CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, ISO-TP transport protocol, and comprehensive bus health monitoring with automatic error recovery. Version 2.2.0 adds unified time resolution with microsecond ticks by default and a legacy `CCX_TIME_IN_MS` compatibility mode, while preserving CAN FD payload transport, configurable `TxDL`, extended single-frame/first-frame length encoding, and payload lengths above `4095` on FD instances. RX lookup strategy selection (linear / binary / hash) remains compile-time configurable.
+CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, ISO-TP transport protocol, and comprehensive bus health monitoring with automatic error recovery. Version 2.1.0 extends ISO-TP to CAN FD payload transport with configurable `TxDL`, extended single-frame/first-frame length encoding, and payload lengths above `4095` on FD instances. Classic CAN behavior remains unchanged, and RX lookup strategy selection (linear / binary / hash) is still compile-time configurable.
 
 ## Table of Contents
 
@@ -21,32 +21,10 @@ CAN CoreX is a lightweight, modular CAN bus communication library designed for e
 4. [Error Codes](#error-codes)
 5. [Data Structures](#data-structures)
 6. [Usage Examples](#usage-examples)
-7. [Time Resolution](#time-resolution)
-8. [ISO-TP Transport Protocol](#iso-tp-transport-protocol)
-9. [Wildcard DLC Matching](#wildcard-dlc-matching)
-10. [Bus Management & Statistics](#bus-management--statistics)
-11. [Best Practices](#best-practices)
-
----
-
-## Time Resolution
-
-`can_corex` operates on a single user-provided tick source. The tick unit is selected at compile time:
-
-| Mode | Flag | Tick unit | STmin `0xF1..0xF9` |
-|------|------|-----------|--------------------|
-| Microsecond (default since v2.2) | *(none)* | `us` | exact `100..900 us` |
-| Millisecond (legacy) | `-DCCX_TIME_IN_MS` | `ms` | rounded up to `1 ms` |
-
-Use `CCX_TIME(us)` for timeout and period constants so the same source works in both modes:
-
-```c
-.TimeOut = CCX_TIME(1000U * 1000U);  // 1 s
-.SendFreq = CCX_TIME(100U * 1000U);  // 100 ms
-.N_Bs = CCX_TIME(1000U * 1000U);     // 1 s
-```
-
-If you compile without `CCX_TIME_IN_MS`, raw literals such as `1000` are interpreted as microseconds, not milliseconds. Existing v2.1.x applications can keep previous behavior by building with `-DCCX_TIME_IN_MS`.
+7. [ISO-TP Transport Protocol](#iso-tp-transport-protocol)
+8. [Wildcard DLC Matching](#wildcard-dlc-matching)
+9. [Bus Management & Statistics](#bus-management--statistics)
+10. [Best Practices](#best-practices)
 
 ---
 
@@ -314,13 +292,11 @@ void CCX_tick_variable_register(CCX_TIME_t *Variable);
 - `Variable`: Pointer to volatile tick counter variable
 
 **Important**: Must be called BEFORE `CCX_Init()`.
-The tick unit must match the selected time resolution: milliseconds if
-`CCX_TIME_IN_MS` is defined, microseconds otherwise.
 
 **Example**:
 ```c
-volatile uint32_t system_tick = 0;
-CCX_tick_variable_register(&system_tick);
+volatile uint32_t system_tick_ms = 0;
+CCX_tick_variable_register(&system_tick_ms);
 ```
 
 ---
@@ -605,9 +581,8 @@ typedef struct {
 ```c
 #include "can_corex.h"
 
-// System tick (incremented by timer interrupt).
-// Use ms with CCX_TIME_IN_MS, us otherwise.
-volatile uint32_t system_tick = 0;
+// System tick (incremented by timer interrupt)
+volatile uint32_t system_tick_ms = 0;
 
 // CAN instance
 CCX_instance_t can1;
@@ -631,7 +606,7 @@ int main(void) {
     can_hardware_init();
     
     // Register tick source
-    CCX_tick_variable_register(&system_tick);
+    CCX_tick_variable_register(&system_tick_ms);
     
     // Initialize CAN CoreX
     CCX_Init(&can1, NULL, NULL, 0, 0, 
@@ -656,7 +631,7 @@ int main(void) {
 
 // Timer interrupt - increment tick
 void SysTick_Handler(void) {
-    system_tick++;
+    system_tick_ms++;
 }
 ```
 
@@ -688,14 +663,14 @@ CCX_RX_table_t rx_table[] = {
         .ID = 0x200,
         .DLC = 2,
         .IDE_flag = 0,
-        .TimeOut = CCX_TIME(1000U * 1000U),  // 1000 ms timeout
+        .TimeOut = 1000,  // 1000ms timeout
         .Parser = parse_sensor_data,
         .TimeoutCallback = sensor_timeout_handler
     }
 };
 
 // Initialize with RX table
-CCX_tick_variable_register(&system_tick);
+CCX_tick_variable_register(&system_tick_ms);
 CCX_Init(&can1, rx_table, NULL, 1, 0,
          hw_send_can_message, hw_can_bus_check, NULL);
 ```
@@ -726,7 +701,7 @@ CCX_TX_table_t tx_table[] = {
         .Data = heartbeat_data,
         .DLC = 2,
         .IDE_flag = 0,
-        .SendFreq = CCX_TIME(100U * 1000U),  // Send every 100 ms
+        .SendFreq = 100,  // Send every 100ms
         .Parser = update_heartbeat
     }
 };
@@ -834,10 +809,10 @@ CCX_ISOTP_TX_Config_t tx_cfg = {
     .IDE_TxID = 0,           // 0 = Standard ID (11-bit)
     .IDE_RxID_FC = 0,        // 0 = Standard ID (11-bit)
     .BS = 0,                 // Block Size (0 = no limit)
-    .STmin = 10,             // Separation Time minimum (10 ms)
-    .N_As = CCX_TIME(1000U * 1000U),
-    .N_Bs = CCX_TIME(1000U * 1000U),
-    .N_Cs = CCX_TIME(1000U * 1000U),
+    .STmin = 10,             // Separation Time minimum (10ms)
+    .N_As = 1000,
+    .N_Bs = 1000,
+    .N_Cs = 1000,
     .MaxWaitFrames = 10,      // Optional FC.WAIT tolerance (0 = library default)
     .Padding = {.Enable = 1, .PaddingByte = 0xAA},
     .UserData = NULL,        // User context pointer (optional)
@@ -877,9 +852,9 @@ CCX_ISOTP_TX_Config_t tx_cfg = {
     .TxDL = CCX_ISOTP_TX_DL_64,
     .BS = 0,
     .STmin = 0,
-    .N_As = CCX_TIME(1000U * 1000U),
-    .N_Bs = CCX_TIME(1000U * 1000U),
-    .N_Cs = CCX_TIME(1000U * 1000U),
+    .N_As = 1000,
+    .N_Bs = 1000,
+    .N_Cs = 1000,
     .MaxWaitFrames = 10,
     .Padding = {.Enable = 1, .PaddingByte = 0xAA},
     .OnTransmitComplete = tx_complete_callback,
@@ -918,10 +893,10 @@ CCX_ISOTP_RX_Config_t rx_cfg = {
     .IDE_RxID = 0,           // 0 = Standard ID (11-bit)
     .IDE_TxID = 0,           // 0 = Standard ID (11-bit)
     .BS = 0,                 // Block Size to request (0 = no limit)
-    .STmin = 10,             // Separation Time to request (10 ms)
-    .N_Ar = CCX_TIME(1000U * 1000U),
-    .N_Br = CCX_TIME(1000U * 1000U),
-    .N_Cr = CCX_TIME(1000U * 1000U),
+    .STmin = 10,             // Separation Time to request (10ms)
+    .N_Ar = 1000,
+    .N_Br = 1000,
+    .N_Cr = 1000,
     .Padding = {.Enable = 1, .PaddingByte = 0xAA},  // FC with padding
     .RxBuffer = rx_buffer,
     .RxBufferSize = sizeof(rx_buffer),
@@ -970,9 +945,9 @@ CCX_ISOTP_RX_Config_t rx_cfg = {
     .FC_TxDL = CCX_ISOTP_TX_DL_64,
     .BS = 0,
     .STmin = 0,
-    .N_Ar = CCX_TIME(1000U * 1000U),
-    .N_Br = CCX_TIME(1000U * 1000U),
-    .N_Cr = CCX_TIME(1000U * 1000U),
+    .N_Ar = 1000,
+    .N_Br = 1000,
+    .N_Cr = 1000,
     .Padding = {.Enable = 1, .PaddingByte = 0xAA},
     .RxBuffer = rx_buffer,
     .RxBufferSize = sizeof(rx_buffer),
@@ -1128,7 +1103,7 @@ CCX_ISOTP_RX_Config_t rx_cfg = {
 ### Limitations
 
 - **Normal addressing only**: Extended and Mixed addressing modes not yet implemented
-- In millisecond builds (`-DCCX_TIME_IN_MS`), sub-millisecond `STmin` values (`0xF1-0xF9`) round up to `1 ms`
+- **STmin < 1ms**: Submillisecond timing (0xF1-0xF9) parsed but not implemented
 
 ---
 
@@ -1457,7 +1432,7 @@ CCX_TX_table_t tx_table[] = {
 
 ```c
 // For safety-critical sensors, always enable timeout
-rx_table[0].TimeOut = CCX_TIME(100U * 1000U);  // 100 ms max between messages
+rx_table[0].TimeOut = 100;  // 100ms max between messages
 rx_table[0].TimeoutCallback = critical_sensor_timeout_handler;
 ```
 
