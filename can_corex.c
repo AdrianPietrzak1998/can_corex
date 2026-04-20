@@ -588,6 +588,7 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
     assert(Instance->BusMonitor != NULL);
 
     CCX_BusMonitor_t *mon = Instance->BusMonitor;
+    CCX_TIME_t current_tick = CCX_GetPrimaryTick();
 
     /* Get current bus state from hardware */
     CCX_BusState_t new_state = mon->GetBusState(Instance);
@@ -627,9 +628,10 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
         if (new_state == CCX_BUS_STATE_OFF)
         {
             mon->stats.bus_off_count++;
-            mon->bus_off_entry_time = CCX_GetHighResTick();
-            mon->recovery_start_time = CCX_GetHighResTick();
-            mon->stats.last_bus_off_time = CCX_GetHighResTick();
+            mon->bus_off_entry_time = current_tick;
+            mon->recovery_start_time = current_tick;
+            mon->recovery_start_time_hr = CCX_GetHighResTick();
+            mon->stats.last_bus_off_time = current_tick;
 
             /* Only reset attempts if not in grace period */
             if (!mon->in_grace_period)
@@ -648,8 +650,8 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
         else if (new_state == CCX_BUS_STATE_ACTIVE && old_state == CCX_BUS_STATE_OFF)
         {
             /* Successful recovery from bus-off */
-            mon->stats.total_bus_off_duration += (CCX_GetHighResTick() - mon->bus_off_entry_time);
-            mon->last_successful_recovery = CCX_GetHighResTick();
+            mon->stats.total_bus_off_duration += (current_tick - mon->bus_off_entry_time);
+            mon->last_successful_recovery = current_tick;
             mon->in_grace_period = 0; /* Exit grace period */
         }
 
@@ -666,14 +668,15 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
         /* Check if in grace period after failed recovery */
         if (mon->in_grace_period)
         {
-            CCX_HR_TIME_t grace_elapsed = CCX_GetHighResTick() - mon->grace_period_start;
+            CCX_TIME_t grace_elapsed = current_tick - mon->grace_period_start;
 
             if (grace_elapsed >= mon->successful_run_time)
             {
                 /* Grace period expired - try again */
                 mon->recovery_attempts = 0; /* Reset counter */
                 mon->in_grace_period = 0;
-                mon->recovery_start_time = CCX_GetHighResTick();
+                mon->recovery_start_time = current_tick;
+                mon->recovery_start_time_hr = CCX_GetHighResTick();
 
                 /* Trigger recovery immediately */
                 mon->recovery_attempts++;
@@ -690,9 +693,20 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
             /* Normal auto-recovery mode */
             if (mon->auto_recovery_enabled)
             {
-                CCX_HR_TIME_t time_in_bus_off = CCX_GetHighResTick() - mon->recovery_start_time;
+                uint8_t recovery_due = 0U;
 
-                if (time_in_bus_off >= mon->recovery_delay)
+                if (mon->recovery_delay.UsesHighRes)
+                {
+                    CCX_HR_TIME_t time_in_bus_off_hr = CCX_GetHighResTick() - mon->recovery_start_time_hr;
+                    recovery_due = (uint8_t)(time_in_bus_off_hr >= mon->recovery_delay.HighResDelay);
+                }
+                else
+                {
+                    CCX_TIME_t time_in_bus_off = current_tick - mon->recovery_start_time;
+                    recovery_due = (uint8_t)(time_in_bus_off >= mon->recovery_delay.BaseDelay);
+                }
+
+                if (recovery_due)
                 {
                     /* Check if we can still attempt recovery */
                     if (mon->max_recovery_attempts == 0 || mon->recovery_attempts < mon->max_recovery_attempts)
@@ -705,7 +719,8 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
                             mon->OnRecoveryAttempt(Instance, mon->recovery_attempts, mon->UserData);
                         }
 
-                        mon->recovery_start_time = CCX_GetHighResTick();
+                        mon->recovery_start_time = current_tick;
+                        mon->recovery_start_time_hr = CCX_GetHighResTick();
                     }
                     else
                     {
@@ -716,7 +731,7 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
                         }
 
                         mon->in_grace_period = 1;
-                        mon->grace_period_start = CCX_GetHighResTick();
+                        mon->grace_period_start = current_tick;
                     }
                 }
             }
@@ -726,7 +741,7 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
     /* Reset recovery counter after successful run time (when ACTIVE) */
     if (new_state == CCX_BUS_STATE_ACTIVE && mon->recovery_attempts > 0)
     {
-        CCX_HR_TIME_t time_since_recovery = CCX_GetHighResTick() - mon->last_successful_recovery;
+        CCX_TIME_t time_since_recovery = current_tick - mon->last_successful_recovery;
 
         if (time_since_recovery >= mon->successful_run_time)
         {
@@ -738,8 +753,8 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
 CCX_Status_t CCX_BusMonitor_Init(CCX_instance_t *Instance, CCX_BusMonitor_t *Monitor,
                                  CCX_BusState_t (*GetBusState)(const CCX_instance_t *),
                                  void (*GetErrorCounters)(const CCX_instance_t *, CCX_ErrorCounters_t *),
-                                 void (*RequestRecovery)(const CCX_instance_t *), CCX_HR_TIME_t recovery_delay,
-                                 CCX_HR_TIME_t successful_run_time, uint8_t auto_recovery_enabled,
+                                 void (*RequestRecovery)(const CCX_instance_t *), CCX_BusRecoveryDelay_t recovery_delay,
+                                 CCX_TIME_t successful_run_time, uint8_t auto_recovery_enabled,
                                  uint8_t max_recovery_attempts)
 {
     if (Instance == NULL || Monitor == NULL || GetBusState == NULL || RequestRecovery == NULL)
@@ -748,7 +763,7 @@ CCX_Status_t CCX_BusMonitor_Init(CCX_instance_t *Instance, CCX_BusMonitor_t *Mon
     }
 
 #ifndef CCX_DISABLE_HIGH_RES_TIMEBASE
-    if (!CCX_IsHighResTickRegistered())
+    if (recovery_delay.UsesHighRes && !CCX_IsHighResTickRegistered())
     {
         memset(Monitor, 0, sizeof(CCX_BusMonitor_t));
         return CCX_MISSING_TIMEBASE;
@@ -801,7 +816,8 @@ CCX_Status_t CCX_BusMonitor_TriggerRecovery(CCX_instance_t *Instance)
     /* Manual recovery resets everything */
     mon->recovery_attempts = 0;
     mon->in_grace_period = 0;
-    mon->recovery_start_time = CCX_GetHighResTick();
+    mon->recovery_start_time = CCX_GetPrimaryTick();
+    mon->recovery_start_time_hr = CCX_GetHighResTick();
 
     /* Trigger first attempt */
     mon->recovery_attempts++;
