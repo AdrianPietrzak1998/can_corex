@@ -1,7 +1,7 @@
 # CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-2.1.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-2.2.0-blue.svg)](#changelog)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
 [![Tests](https://img.shields.io/badge/Tests-340--344%20classic%20%7C%20516--527%20FD%20passing-success.svg)]()
@@ -1571,12 +1571,11 @@ void can_task(void *param) {
 ## Limitations
 
 1. **Buffer Size**: Fixed at compile time (`CCX_RX_BUFFER_SIZE`, `CCX_TX_BUFFER_SIZE`)
-2. **DLC Range**: 0-8 in classic builds (CAN 2.0); 0-15 in FD builds (`-DCCX_ENABLE_CANFD=1`)
-3. **ISO-TP effective payload limit depends on instance format**:
+2. **ISO-TP effective payload limit depends on instance format**:
    - classic instance: `CCX_ISOTP_MAX_CLASSIC_DATA_SIZE` (`4095` by default)
    - FD instance: `CCX_ISOTP_MAX_FD_DATA_SIZE` (`UINT32_MAX` by default, still bounded by application buffer sizes and available memory)
-4. **Timeout Range**: Limited by `CCX_TIME_t` type (default: `uint32_t`)
-5. **Not Thread-Safe**: Requires external synchronization in multi-threaded environments
+3. **Timeout Range**: Limited by `CCX_TIME_t` type (default: `uint32_t`)
+4. **Not Thread-Safe**: Requires external synchronization in multi-threaded environments
 
 
 ---
@@ -1592,7 +1591,31 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v2.1.0 (2026-04-19)
+### Current Release: v2.2.0 (2026-04-21)
+- **Timebase contract cleanup**:
+  - core CAN RX/TX logic now always uses the primary `ms` timebase
+  - optional HR timing is a separate domain with its own type family and independent tick registration
+  - `CCX_TICK_FROM_FUNC` and `CCX_HR_TICK_FROM_FUNC` are fully independent
+  - `CCX_IsPrimaryTickRegistered()` and `CCX_IsHighResTickRegistered()` expose registration state
+- **Timebase type restrictions**:
+  - allowed custom widths are now `uint16_t`, `uint32_t`, `uint64_t`
+  - `uint8_t` timebases are rejected because their range is too small for this library
+  - old signed timebase selection macros are rejected with a hard compile-time error because they were a historical bug and break timeout arithmetic
+- **ISO-TP timing cleanup**:
+  - `N_As`, `N_Bs`, `N_Cs`, `N_Ar`, `N_Br`, `N_Cr` now use the primary `ms` timebase
+  - HR timing is used only for sub-millisecond `STmin` values (`0xF1..0xF9`)
+  - in single-timebase builds, sub-millisecond `STmin` is rounded up to the primary `ms` tick
+- **Bus monitoring timing cleanup**:
+  - `successful_run_time` now always uses the primary `ms` timebase
+  - `recovery_delay` is now configured through `CCX_BUS_RECOVERY_MS(...)` or `CCX_BUS_RECOVERY_US(...)`
+  - `CCX_BUS_RECOVERY_US(x)` uses HR only for `x <= 3000 us`; above that it falls back to base `ms`
+  - classic recovery constants up to `250 kbps` are expressed in `ms`; faster classic/FD constants use precise `us` values where it matters
+  - `500 kbps` recovery constant corrected to `2816 us`
+- **Testing**:
+  - added explicit bus recovery threshold coverage for `2999 us`, `3000 us`, and `3001 us`
+  - current verified totals: classic linear `351`, FD linear `528`
+
+### Previous Release: v2.1.0 (2026-04-19)
 - **CAN FD Support** (`-DCCX_ENABLE_CANFD=1`): 64-byte payloads, BRS, ESI — zero overhead when disabled
   - `CCX_frame_format_t` (3 values): `CCX_FRAME_FORMAT_CLASSIC=0`, `CCX_FRAME_FORMAT_FD=1`, `CCX_FRAME_FORMAT_FD_BRS=2` — replaces separate `FDF:1 + BRS:1` bitfields; present in `CCX_message_t`, `CCX_RX_table_t`, `CCX_TX_table_t`; per-message/per-entry (not per-instance)
   - `CCX_ide_t` enum: `CCX_ID_STANDARD=0`, `CCX_ID_EXTENDED=1` — named constants for all `IDE_flag` fields
