@@ -155,6 +155,12 @@ typedef enum
     CCX_ISOTP_RX_STATE_RECEIVING_CF
 } CCX_ISOTP_RX_State_t;
 
+typedef enum
+{
+    CCX_ISOTP_PADDING_DISABLED = 0,
+    CCX_ISOTP_PADDING_ENABLED = 1
+} CCX_ISOTP_PaddingEnable_t;
+
 /**
  * @brief ISO-TP padding configuration
  *
@@ -163,9 +169,25 @@ typedef enum
  */
 typedef struct
 {
-    uint8_t Enable;      /* 1 = pad frames to target CAN payload length, 0 = no padding */
+    CCX_ISOTP_PaddingEnable_t Enable; /* Enable or disable ISO-TP frame padding */
     uint8_t PaddingByte; /* Byte value used for padding (e.g., 0xAA, 0xCC, 0x55) */
 } CCX_ISOTP_Padding_t;
+
+#define CCX_ISOTP_NO_PADDING                                                                                           \
+    ((CCX_ISOTP_Padding_t){.Enable = CCX_ISOTP_PADDING_DISABLED, .PaddingByte = 0U})
+
+#define CCX_ISOTP_PADDING(byte)                                                                                        \
+    ((CCX_ISOTP_Padding_t){.Enable = CCX_ISOTP_PADDING_ENABLED, .PaddingByte = (uint8_t)(byte)})
+
+#define CCX_ISOTP_STMIN_100US 0xF1U
+#define CCX_ISOTP_STMIN_200US 0xF2U
+#define CCX_ISOTP_STMIN_300US 0xF3U
+#define CCX_ISOTP_STMIN_400US 0xF4U
+#define CCX_ISOTP_STMIN_500US 0xF5U
+#define CCX_ISOTP_STMIN_600US 0xF6U
+#define CCX_ISOTP_STMIN_700US 0xF7U
+#define CCX_ISOTP_STMIN_800US 0xF8U
+#define CCX_ISOTP_STMIN_900US 0xF9U
 
 typedef struct CCX_ISOTP_TX_t CCX_ISOTP_TX_t;
 typedef struct CCX_ISOTP_RX_t CCX_ISOTP_RX_t;
@@ -201,18 +223,12 @@ typedef struct CCX_ISOTP_RX_t CCX_ISOTP_RX_t;
  */
 typedef struct
 {
-    CCX_instance_t *CanInstance; /* Pointer to CAN CoreX instance */
     uint32_t TxID;               /* CAN ID for transmitting data */
-    uint32_t RxID_FC;            /* CAN ID for receiving Flow Control frames */
     uint8_t IDE_TxID : 1;        /* use CCX_ide_t values: CCX_ID_STANDARD / CCX_ID_EXTENDED */
-    uint8_t IDE_RxID_FC : 1;     /* use CCX_ide_t values: CCX_ID_STANDARD / CCX_ID_EXTENDED */
 #if CCX_ENABLE_CANFD
     CCX_frame_format_t FrameFormat : 2; /* Session transport format: CLASSIC / FD / FD_BRS */
     uint8_t TxDL;                       /* FD only: link-layer payload 8,12,16,20,24,32,48,64 */
 #endif
-    uint8_t BS;                  /* Block Size: number of CF before expecting FC (0 = no limit) */
-    uint8_t STmin;               /* Separation Time minimum (0-127ms or 0xF1-0xF9 for 100-900us) */
-    CCX_TIME_t N_As;             /* Informational timeout for TX of SF/FF/CF in base ticks; not enforced internally */
     CCX_TIME_t N_Bs;             /* Timeout for reception of FC after FF/CF in base ticks */
     CCX_TIME_t N_Cs;             /* Timeout between CF transmissions in base ticks */
     uint8_t MaxWaitFrames;       /* Number of FC.WAIT frames tolerated before aborting (0 = default 10) */
@@ -263,16 +279,10 @@ typedef struct
  * @note `OnReceiveProgress` receives `BytesReceived` as the delta since the previous
  * callback, not an absolute offset from the start of the transfer.
  *
- * @note `N_Ar` and `N_Br` are currently informational only. The library does not
- * enforce them internally because it does not observe physical CAN controller
- * transmission completion.
  */
 typedef struct
 {
-    CCX_instance_t *CanInstance; /* Pointer to CAN CoreX instance */
-    uint32_t RxID;               /* CAN ID for receiving data */
     uint32_t TxID;               /* CAN ID for transmitting Flow Control */
-    uint8_t IDE_RxID : 1;        /* use CCX_ide_t values: CCX_ID_STANDARD / CCX_ID_EXTENDED */
     uint8_t IDE_TxID : 1;        /* use CCX_ide_t values: CCX_ID_STANDARD / CCX_ID_EXTENDED */
 #if CCX_ENABLE_CANFD
     CCX_frame_format_t FrameFormat : 2; /* Expected transport format of received ISO-TP frames */
@@ -280,8 +290,6 @@ typedef struct
 #endif
     uint8_t BS;                  /* Block Size to request in FC (0 = no limit) */
     uint8_t STmin;               /* Separation Time minimum to request in FC */
-    CCX_TIME_t N_Ar;             /* Informational timeout for RX of SF/FF/CF in base ticks; not enforced internally */
-    CCX_TIME_t N_Br;             /* Informational timeout for FC transmission after FF/CF in base ticks; not enforced internally */
     CCX_TIME_t N_Cr;             /* Timeout between received CF in base ticks. Detects silence, not correctness: if a later CF arrives before `N_Cr` expires, RX may fail with `CCX_ISOTP_ERROR_SEQUENCE` instead of `CCX_ISOTP_ERROR_TIMEOUT_CF_RX` */
     CCX_ISOTP_Padding_t Padding; /* Padding configuration */
 
@@ -304,6 +312,7 @@ typedef struct
  */
 struct CCX_ISOTP_TX_t
 {
+    CCX_instance_t *CanInstance; /* Bound CAN instance for this ISO-TP TX session */
     CCX_ISOTP_TX_Config_t Config;
     CCX_ISOTP_TX_State_t State;
 
@@ -329,6 +338,7 @@ struct CCX_ISOTP_TX_t
  */
 struct CCX_ISOTP_RX_t
 {
+    CCX_instance_t *CanInstance; /* Bound CAN instance for this ISO-TP RX session */
     CCX_ISOTP_RX_Config_t Config;
     CCX_ISOTP_RX_State_t State;
 
@@ -344,18 +354,67 @@ struct CCX_ISOTP_RX_t
 };
 
 /**
+ * @brief Initialize ISO-TP TX configuration with defaults
+ *
+ * Fills `Config` with a classic/no-padding configuration and library defaults
+ * for fields that can be inferred or safely defaulted. Callers may override any
+ * fields after initialization and before `CCX_ISOTP_TX_Init()`.
+ *
+ * @param Config Pointer to TX configuration to initialize
+ * @param TxID CAN ID for transmitting data
+ * @param IDE_TxID CAN identifier type for `TxID`
+ * @param N_Bs Timeout for reception of FC after FF/CF in base ticks
+ * @param N_Cs Timeout between CF transmissions in base ticks
+ * @param Padding Padding configuration
+ * @param UserData User context pointer passed to callbacks
+ * @param OnTransmitComplete Completion callback
+ * @param OnError Error callback
+ */
+void CCX_ISOTP_TX_Config_Init(CCX_ISOTP_TX_Config_t *Config, uint32_t TxID, uint8_t IDE_TxID, CCX_TIME_t N_Bs,
+                              CCX_TIME_t N_Cs, CCX_ISOTP_Padding_t Padding, void *UserData,
+                              void (*OnTransmitComplete)(CCX_ISOTP_TX_t *Instance, void *UserData),
+                              void (*OnError)(CCX_ISOTP_TX_t *Instance, CCX_ISOTP_Status_t Error, void *UserData));
+
+#if CCX_ENABLE_CANFD
+/**
+ * @brief Initialize ISO-TP TX FD configuration with defaults
+ *
+ * Same as `CCX_ISOTP_TX_Config_Init()`, but also applies the FD-specific
+ * transport fields in one step.
+ *
+ * @param Config Pointer to TX configuration to initialize
+ * @param TxID CAN ID for transmitting data
+ * @param IDE_TxID CAN identifier type for `TxID`
+ * @param FrameFormat Session transport format: `CCX_FRAME_FORMAT_FD` or `CCX_FRAME_FORMAT_FD_BRS`
+ * @param TxDL FD link-layer payload size
+ * @param N_Bs Timeout for reception of FC after FF/CF in milliseconds
+ * @param N_Cs Timeout between CF transmissions in milliseconds
+ * @param Padding Padding configuration
+ * @param UserData User context pointer passed to callbacks
+ * @param OnTransmitComplete Completion callback
+ * @param OnError Error callback
+ */
+void CCX_ISOTP_TX_Config_InitFD(CCX_ISOTP_TX_Config_t *Config, uint32_t TxID, uint8_t IDE_TxID,
+                                CCX_frame_format_t FrameFormat, uint8_t TxDL, CCX_TIME_t N_Bs, CCX_TIME_t N_Cs,
+                                CCX_ISOTP_Padding_t Padding, void *UserData,
+                                void (*OnTransmitComplete)(CCX_ISOTP_TX_t *Instance, void *UserData),
+                                void (*OnError)(CCX_ISOTP_TX_t *Instance, CCX_ISOTP_Status_t Error, void *UserData));
+#endif
+
+/**
  * @brief Initialize ISO-TP TX instance
  *
  * @param Instance Pointer to TX instance structure
+ * @param CanInstance Pointer to CAN CoreX instance
  * @param Config Pointer to TX configuration
  * @return CCX_ISOTP_OK on success, error code otherwise
  *
  * @note In FD builds, `Config->TxDL` is validated only for FD sessions.
  * Classic sessions keep the classic `4095`-byte transport limit even when
  * `CCX_ENABLE_CANFD=1`.
- * @note `N_As` is currently informational only and is not enforced internally.
  */
-CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, const CCX_ISOTP_TX_Config_t *Config);
+CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, CCX_instance_t *CanInstance,
+                                     const CCX_ISOTP_TX_Config_t *Config);
 
 /**
  * @brief Abort an active ISO-TP TX transfer
@@ -404,16 +463,92 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance);
 void CCX_ISOTP_TX_FC_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Msg, uint16_t Slot, void *UserData);
 
 /**
+ * @brief Initialize ISO-TP RX configuration with defaults
+ *
+ * Fills `Config` with a classic/no-padding configuration and library defaults
+ * for fields that can be inferred or safely defaulted. Callers may override any
+ * fields after initialization and before `CCX_ISOTP_RX_Init()`.
+ *
+ * @param Config Pointer to RX configuration to initialize
+ * @param TxID CAN ID for transmitting Flow Control
+ * @param IDE_TxID CAN identifier type for `TxID`
+ * @param BS Block Size to request in FC
+ * @param STmin Separation Time minimum to request in FC
+ * @param N_Cr Timeout between received CF in base ticks
+ * @param RxBuffer Buffer for received data
+ * @param RxBufferSize Size of RX buffer
+ * @param Padding Padding configuration
+ * @param ProgressCallbackInterval Call progress callback every N newly received bytes (0 = disabled)
+ * @param UserData User context pointer passed to callbacks
+ * @param OnReceiveStart Start callback
+ * @param OnReceiveComplete Completion callback
+ * @param OnReceiveProgress Progress callback
+ * @param OnError Error callback
+ */
+void CCX_ISOTP_RX_Config_Init(CCX_ISOTP_RX_Config_t *Config, uint32_t TxID, uint8_t IDE_TxID, uint8_t BS,
+                              uint8_t STmin, CCX_TIME_t N_Cr, uint8_t *RxBuffer, CCX_ISOTP_Length_t RxBufferSize,
+                              CCX_ISOTP_Padding_t Padding, CCX_ISOTP_Length_t ProgressCallbackInterval,
+                              void *UserData,
+                              void (*OnReceiveStart)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t TotalLength,
+                                                     void *UserData),
+                              void (*OnReceiveComplete)(CCX_ISOTP_RX_t *Instance, const uint8_t *Data,
+                                                        CCX_ISOTP_Length_t Length, void *UserData),
+                              void (*OnReceiveProgress)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t BytesReceived,
+                                                        CCX_ISOTP_Length_t TotalLength, void *UserData),
+                              void (*OnError)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Status_t Error, void *UserData));
+
+#if CCX_ENABLE_CANFD
+/**
+ * @brief Initialize ISO-TP RX FD configuration with defaults
+ *
+ * Same as `CCX_ISOTP_RX_Config_Init()`, but also applies the FD-specific
+ * receive/session transport fields in one step.
+ *
+ * @param Config Pointer to RX configuration to initialize
+ * @param TxID CAN ID for transmitting Flow Control
+ * @param IDE_TxID CAN identifier type for `TxID`
+ * @param FrameFormat Expected transport format of received ISO-TP frames
+ * @param FC_TxDL FD link-layer payload size used for transmitted FC frames
+ * @param BS Block Size to request in FC
+ * @param STmin Separation Time minimum to request in FC
+ * @param N_Cr Timeout between received CF in milliseconds
+ * @param RxBuffer Buffer for received data
+ * @param RxBufferSize Size of RX buffer
+ * @param Padding Padding configuration
+ * @param ProgressCallbackInterval Call progress callback every N newly received bytes (0 = disabled)
+ * @param UserData User context pointer passed to callbacks
+ * @param OnReceiveStart Start callback
+ * @param OnReceiveComplete Completion callback
+ * @param OnReceiveProgress Progress callback
+ * @param OnError Error callback
+ */
+void CCX_ISOTP_RX_Config_InitFD(CCX_ISOTP_RX_Config_t *Config, uint32_t TxID, uint8_t IDE_TxID,
+                                CCX_frame_format_t FrameFormat, uint8_t FC_TxDL, uint8_t BS, uint8_t STmin,
+                                CCX_TIME_t N_Cr, uint8_t *RxBuffer, CCX_ISOTP_Length_t RxBufferSize,
+                                CCX_ISOTP_Padding_t Padding, CCX_ISOTP_Length_t ProgressCallbackInterval,
+                                void *UserData,
+                                void (*OnReceiveStart)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t TotalLength,
+                                                       void *UserData),
+                                void (*OnReceiveComplete)(CCX_ISOTP_RX_t *Instance, const uint8_t *Data,
+                                                          CCX_ISOTP_Length_t Length, void *UserData),
+                                void (*OnReceiveProgress)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t BytesReceived,
+                                                          CCX_ISOTP_Length_t TotalLength, void *UserData),
+                                void (*OnError)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Status_t Error, void *UserData));
+#endif
+
+/**
  * @brief Initialize ISO-TP RX instance
  *
  * @param Instance Pointer to RX instance structure
+ * @param CanInstance Pointer to CAN CoreX instance
  * @param Config Pointer to RX configuration
  * @return CCX_ISOTP_OK on success, error code otherwise
  *
  * @note In FD builds, `Config->FC_TxDL` is used only for transmitted Flow Control
  * frames when the RX session itself is configured for FD.
  */
-CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_RX_Config_t *Config);
+CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, CCX_instance_t *CanInstance,
+                                     const CCX_ISOTP_RX_Config_t *Config);
 
 /**
  * @brief Abort an active ISO-TP RX transfer

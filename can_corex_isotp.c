@@ -438,14 +438,54 @@ static inline uint8_t ISOTP_IsRXTransferActive(const CCX_ISOTP_RX_t *Instance)
                      Instance->RxDataLength > 0U);
 }
 
-CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, const CCX_ISOTP_TX_Config_t *Config)
+void CCX_ISOTP_TX_Config_Init(CCX_ISOTP_TX_Config_t *Config, uint32_t TxID, uint8_t IDE_TxID, CCX_TIME_t N_Bs,
+                              CCX_TIME_t N_Cs, CCX_ISOTP_Padding_t Padding, void *UserData,
+                              void (*OnTransmitComplete)(CCX_ISOTP_TX_t *Instance, void *UserData),
+                              void (*OnError)(CCX_ISOTP_TX_t *Instance, CCX_ISOTP_Status_t Error, void *UserData))
 {
-    if (NULL == Instance || NULL == Config)
+    if (NULL == Config)
     {
-        return CCX_ISOTP_ERROR_NULL_PTR;
+        return;
     }
 
-    if (NULL == Config->CanInstance)
+    memset(Config, 0, sizeof(CCX_ISOTP_TX_Config_t));
+    Config->TxID = TxID;
+    Config->IDE_TxID = IDE_TxID;
+#if CCX_ENABLE_CANFD
+    Config->FrameFormat = CCX_FRAME_FORMAT_CLASSIC;
+    Config->TxDL = 0U;
+#endif
+    Config->N_Bs = N_Bs;
+    Config->N_Cs = N_Cs;
+    Config->MaxWaitFrames = 0U;
+    Config->Padding = Padding;
+    Config->UserData = UserData;
+    Config->OnTransmitComplete = OnTransmitComplete;
+    Config->OnError = OnError;
+}
+
+#if CCX_ENABLE_CANFD
+void CCX_ISOTP_TX_Config_InitFD(CCX_ISOTP_TX_Config_t *Config, uint32_t TxID, uint8_t IDE_TxID,
+                                CCX_frame_format_t FrameFormat, uint8_t TxDL, CCX_TIME_t N_Bs, CCX_TIME_t N_Cs,
+                                CCX_ISOTP_Padding_t Padding, void *UserData,
+                                void (*OnTransmitComplete)(CCX_ISOTP_TX_t *Instance, void *UserData),
+                                void (*OnError)(CCX_ISOTP_TX_t *Instance, CCX_ISOTP_Status_t Error, void *UserData))
+{
+    CCX_ISOTP_TX_Config_Init(Config, TxID, IDE_TxID, N_Bs, N_Cs, Padding, UserData, OnTransmitComplete, OnError);
+    if (NULL == Config)
+    {
+        return;
+    }
+
+    Config->FrameFormat = FrameFormat;
+    Config->TxDL = TxDL;
+}
+#endif
+
+CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, CCX_instance_t *CanInstance,
+                                     const CCX_ISOTP_TX_Config_t *Config)
+{
+    if (NULL == Instance || NULL == CanInstance || NULL == Config)
     {
         return CCX_ISOTP_ERROR_NULL_PTR;
     }
@@ -472,6 +512,7 @@ CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, const CCX_ISOTP_T
 #endif
 
     memcpy(&Instance->Config, Config, sizeof(CCX_ISOTP_TX_Config_t));
+    Instance->CanInstance = CanInstance;
     Instance->State = CCX_ISOTP_TX_STATE_IDLE;
     Instance->LastTick = 0;
     Instance->LastHighResTick = 0;
@@ -595,7 +636,7 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
             return CCX_ISOTP_ERROR_INVALID_ARG;
         }
 
-        ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
+        ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
                              used_len, target_can_dl, &Instance->Config.Padding
 #if CCX_ENABLE_CANFD
                              ,
@@ -643,7 +684,7 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
     memcpy(&frame[ISOTP_GetFirstFrameHeaderSize(Instance->LengthFormat)], Data, (size_t)first_frame_data_capacity);
     used_len = (uint8_t)(ISOTP_GetFirstFrameHeaderSize(Instance->LengthFormat) + first_frame_data_capacity);
 
-    ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
+    ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
                          used_len, tx_dl, &Instance->Config.Padding
 #if CCX_ENABLE_CANFD
                          ,
@@ -779,7 +820,7 @@ static inline void CCX_ISOTP_TX_SendConsecutiveFrame(CCX_ISOTP_TX_t *Instance)
         return;
     }
 
-    ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
+    ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
                          used_len, target_can_dl, &Instance->Config.Padding
 #if CCX_ENABLE_CANFD
                          ,
@@ -877,14 +918,79 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
     }
 }
 
-CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_RX_Config_t *Config)
+void CCX_ISOTP_RX_Config_Init(CCX_ISOTP_RX_Config_t *Config, uint32_t TxID, uint8_t IDE_TxID, uint8_t BS,
+                              uint8_t STmin, CCX_TIME_t N_Cr, uint8_t *RxBuffer, CCX_ISOTP_Length_t RxBufferSize,
+                              CCX_ISOTP_Padding_t Padding, CCX_ISOTP_Length_t ProgressCallbackInterval, void *UserData,
+                              void (*OnReceiveStart)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t TotalLength,
+                                                     void *UserData),
+                              void (*OnReceiveComplete)(CCX_ISOTP_RX_t *Instance, const uint8_t *Data,
+                                                        CCX_ISOTP_Length_t Length, void *UserData),
+                              void (*OnReceiveProgress)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t BytesReceived,
+                                                        CCX_ISOTP_Length_t TotalLength, void *UserData),
+                              void (*OnError)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Status_t Error, void *UserData))
 {
-    if (NULL == Instance || NULL == Config)
+    if (NULL == Config)
+    {
+        return;
+    }
+
+    memset(Config, 0, sizeof(CCX_ISOTP_RX_Config_t));
+    Config->TxID = TxID;
+    Config->IDE_TxID = IDE_TxID;
+#if CCX_ENABLE_CANFD
+    Config->FrameFormat = CCX_FRAME_FORMAT_CLASSIC;
+    Config->FC_TxDL = 0U;
+#endif
+    Config->BS = BS;
+    Config->STmin = STmin;
+    Config->N_Cr = N_Cr;
+    Config->Padding = Padding;
+    Config->RxBuffer = RxBuffer;
+    Config->RxBufferSize = RxBufferSize;
+    Config->ProgressCallbackInterval = ProgressCallbackInterval;
+    Config->UserData = UserData;
+    Config->OnReceiveStart = OnReceiveStart;
+    Config->OnReceiveComplete = OnReceiveComplete;
+    Config->OnReceiveProgress = OnReceiveProgress;
+    Config->OnError = OnError;
+}
+
+#if CCX_ENABLE_CANFD
+void CCX_ISOTP_RX_Config_InitFD(CCX_ISOTP_RX_Config_t *Config, uint32_t TxID, uint8_t IDE_TxID,
+                                CCX_frame_format_t FrameFormat, uint8_t FC_TxDL, uint8_t BS, uint8_t STmin,
+                                CCX_TIME_t N_Cr, uint8_t *RxBuffer, CCX_ISOTP_Length_t RxBufferSize,
+                                CCX_ISOTP_Padding_t Padding, CCX_ISOTP_Length_t ProgressCallbackInterval,
+                                void *UserData,
+                                void (*OnReceiveStart)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t TotalLength,
+                                                       void *UserData),
+                                void (*OnReceiveComplete)(CCX_ISOTP_RX_t *Instance, const uint8_t *Data,
+                                                          CCX_ISOTP_Length_t Length, void *UserData),
+                                void (*OnReceiveProgress)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t BytesReceived,
+                                                          CCX_ISOTP_Length_t TotalLength, void *UserData),
+                                void (*OnError)(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Status_t Error, void *UserData))
+{
+    CCX_ISOTP_RX_Config_Init(Config, TxID, IDE_TxID, BS, STmin, N_Cr, RxBuffer, RxBufferSize, Padding,
+                             ProgressCallbackInterval, UserData, OnReceiveStart, OnReceiveComplete,
+                             OnReceiveProgress, OnError);
+    if (NULL == Config)
+    {
+        return;
+    }
+
+    Config->FrameFormat = FrameFormat;
+    Config->FC_TxDL = FC_TxDL;
+}
+#endif
+
+CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, CCX_instance_t *CanInstance,
+                                     const CCX_ISOTP_RX_Config_t *Config)
+{
+    if (NULL == Instance || NULL == CanInstance || NULL == Config)
     {
         return CCX_ISOTP_ERROR_NULL_PTR;
     }
 
-    if (NULL == Config->CanInstance || NULL == Config->RxBuffer)
+    if (NULL == Config->RxBuffer)
     {
         return CCX_ISOTP_ERROR_NULL_PTR;
     }
@@ -899,6 +1005,13 @@ CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_R
         return CCX_ISOTP_ERROR_BUSY;
     }
 
+#ifdef CCX_DISABLE_HIGH_RES_TIMEBASE
+    if (ISOTP_STminUsesHighRes(Config->STmin))
+    {
+        return CCX_ISOTP_ERROR_INVALID_ARG;
+    }
+#endif
+
 #if CCX_ENABLE_CANFD
     uint8_t active_tx_dl = ISOTP_GetConfiguredTxDL(Config->FrameFormat, Config->FC_TxDL);
     if (!ISOTP_IsValidTxDL(active_tx_dl))
@@ -908,6 +1021,7 @@ CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, const CCX_ISOTP_R
 #endif
 
     memcpy(&Instance->Config, Config, sizeof(CCX_ISOTP_RX_Config_t));
+    Instance->CanInstance = CanInstance;
     Instance->State = CCX_ISOTP_RX_STATE_IDLE;
     Instance->LastTick = 0;
     Instance->InitValid = 1U;
@@ -970,7 +1084,7 @@ static inline void CCX_ISOTP_RX_SendFlowControl(CCX_ISOTP_RX_t *Instance, CCX_IS
         return;
     }
 
-    ISOTP_SendCANMessage(Instance->Config.CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
+    ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
                          ISOTP_FC_FRAME_DATA_SIZE, target_can_dl, &Instance->Config.Padding
 #if CCX_ENABLE_CANFD
                          ,

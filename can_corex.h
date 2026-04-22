@@ -190,7 +190,7 @@ typedef volatile uint64_t CCX_HR_TIME_t;
 #define CCX_HR_TIME_BASE_SCALAR uint64_t
 #define CCX_HR_MAX_TIMEOUT UINT64_MAX
 #else
-typedef volatile uint32_t CCX_HR_TIME_t;
+typedef volatile uint16_t CCX_HR_TIME_t;
 #define CCX_HR_TIME_BASE_SCALAR uint16_t
 #define CCX_HR_MAX_TIMEOUT UINT16_MAX
 #endif
