@@ -341,8 +341,9 @@ static inline void CCX_Timeout_Check(CCX_instance_t *Instance)
     {
         for (uint16_t i = 0; i < Instance->RxTableSize; i++)
         {
+            CCX_TIME_t elapsed = (CCX_TIME_t)(CCX_GetPrimaryTick() - Instance->CCX_RX_table[i].LastTick);
             if ((0 != Instance->CCX_RX_table[i].TimeOut) &&
-                (CCX_GetPrimaryTick() - Instance->CCX_RX_table[i].LastTick >= Instance->CCX_RX_table[i].TimeOut))
+                (elapsed >= Instance->CCX_RX_table[i].TimeOut))
             {
                 Instance->CCX_RX_table[i].LastTick = CCX_GetPrimaryTick();
                 if (NULL != Instance->CCX_RX_table[i].TimeoutCallback)
@@ -430,7 +431,8 @@ static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
 
     for (uint16_t i = 0; i < Instance->TxTableSize; i++)
     {
-        if (CCX_GetPrimaryTick() - Instance->CCX_TX_table[i].LastTick >= Instance->CCX_TX_table[i].SendFreq)
+        CCX_TIME_t elapsed = (CCX_TIME_t)(CCX_GetPrimaryTick() - Instance->CCX_TX_table[i].LastTick);
+        if (elapsed >= Instance->CCX_TX_table[i].SendFreq)
         {
             Instance->CCX_TX_table[i].LastTick = CCX_GetPrimaryTick();
 
@@ -650,7 +652,7 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
         else if (new_state == CCX_BUS_STATE_ACTIVE && old_state == CCX_BUS_STATE_OFF)
         {
             /* Successful recovery from bus-off */
-            mon->stats.total_bus_off_duration += (current_tick - mon->bus_off_entry_time);
+            mon->stats.total_bus_off_duration += (CCX_TIME_t)(current_tick - mon->bus_off_entry_time);
             mon->last_successful_recovery = current_tick;
             mon->in_grace_period = 0; /* Exit grace period */
         }
@@ -668,7 +670,7 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
         /* Check if in grace period after failed recovery */
         if (mon->in_grace_period)
         {
-            CCX_TIME_t grace_elapsed = current_tick - mon->grace_period_start;
+            CCX_TIME_t grace_elapsed = (CCX_TIME_t)(current_tick - mon->grace_period_start);
 
             if (grace_elapsed >= mon->successful_run_time)
             {
@@ -697,12 +699,13 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
 
                 if (mon->recovery_delay.UsesHighRes)
                 {
-                    CCX_HR_TIME_t time_in_bus_off_hr = CCX_GetHighResTick() - mon->recovery_start_time_hr;
+                    CCX_HR_TIME_t time_in_bus_off_hr =
+                        (CCX_HR_TIME_t)(CCX_GetHighResTick() - mon->recovery_start_time_hr);
                     recovery_due = (uint8_t)(time_in_bus_off_hr >= mon->recovery_delay.HighResDelay);
                 }
                 else
                 {
-                    CCX_TIME_t time_in_bus_off = current_tick - mon->recovery_start_time;
+                    CCX_TIME_t time_in_bus_off = (CCX_TIME_t)(current_tick - mon->recovery_start_time);
                     recovery_due = (uint8_t)(time_in_bus_off >= mon->recovery_delay.BaseDelay);
                 }
 
@@ -741,7 +744,7 @@ static void CCX_BusMonitor_Update(CCX_instance_t *Instance)
     /* Reset recovery counter after successful run time (when ACTIVE) */
     if (new_state == CCX_BUS_STATE_ACTIVE && mon->recovery_attempts > 0)
     {
-        CCX_TIME_t time_since_recovery = current_tick - mon->last_successful_recovery;
+        CCX_TIME_t time_since_recovery = (CCX_TIME_t)(current_tick - mon->last_successful_recovery);
 
         if (time_since_recovery >= mon->successful_run_time)
         {

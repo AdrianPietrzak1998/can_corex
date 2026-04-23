@@ -876,7 +876,9 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
         break;
 
     case CCX_ISOTP_TX_STATE_WAIT_FC:
-        if (Instance->Config.N_Bs > 0U && current_tick - Instance->LastTick >= Instance->Config.N_Bs)
+    {
+        CCX_TIME_t base_delta = (CCX_TIME_t)(current_tick - Instance->LastTick);
+        if (Instance->Config.N_Bs > 0U && base_delta >= Instance->Config.N_Bs)
         {
             Instance->State = CCX_ISOTP_TX_STATE_IDLE;
             if (Instance->Config.OnError != NULL)
@@ -886,9 +888,12 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
             ISOTP_ResetTXTransfer(Instance);
         }
         break;
+    }
 
     case CCX_ISOTP_TX_STATE_SENDING_CF:
-        if (Instance->Config.N_Cs > 0U && current_tick - Instance->LastTick > Instance->Config.N_Cs)
+    {
+        CCX_TIME_t base_delta = (CCX_TIME_t)(current_tick - Instance->LastTick);
+        if (Instance->Config.N_Cs > 0U && base_delta > Instance->Config.N_Cs)
         {
             Instance->State = CCX_ISOTP_TX_STATE_IDLE;
             if (Instance->Config.OnError != NULL)
@@ -909,11 +914,12 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
                 CCX_ISOTP_TX_SendConsecutiveFrame(Instance);
             }
         }
-        else if (current_tick - Instance->LastTick >= Instance->STminTicks)
+        else if (base_delta >= Instance->STminTicks)
         {
             CCX_ISOTP_TX_SendConsecutiveFrame(Instance);
         }
         break;
+    }
 
     default:
         break;
@@ -1468,7 +1474,8 @@ void CCX_ISOTP_RX_Poll(CCX_ISOTP_RX_t *Instance)
     }
 
     current_tick = CCX_GetPrimaryTick();
-    if (Instance->Config.N_Cr > 0U && current_tick - Instance->LastTick >= Instance->Config.N_Cr)
+    if (Instance->Config.N_Cr > 0U &&
+        (CCX_TIME_t)(current_tick - Instance->LastTick) >= Instance->Config.N_Cr)
     {
         Instance->State = CCX_ISOTP_RX_STATE_IDLE;
         if (Instance->Config.OnError != NULL)
