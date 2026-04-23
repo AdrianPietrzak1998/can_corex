@@ -146,10 +146,10 @@ CCX_Status_t CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
         return CCX_BUS_TOO_BUSY;
     }
 
+    /* Publish the new head only after the slot is fully written. */
+    memcpy(&Instance->RxBuf[next_head], msg, sizeof(CCX_message_t));
+    Instance->RxReceivedTick[next_head] = CCX_GetPrimaryTick();
     Instance->RxHead = next_head;
-
-    memcpy(&Instance->RxBuf[Instance->RxHead], msg, sizeof(CCX_message_t));
-    Instance->RxReceivedTick[Instance->RxHead] = CCX_GetPrimaryTick();
 
     Instance->GlobalStats.total_rx_messages++; /* Increment RX counter (v1.3.0) */
 
@@ -408,11 +408,11 @@ CCX_Status_t CCX_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
         return CCX_BUS_TOO_BUSY;
     }
 
+    /* Publish the new head only after the slot is fully written. */
+    memcpy(&Instance->TxBuf[next_head], msg, sizeof(CCX_message_t));
     Instance->TxHead = next_head;
 
-    memcpy(&Instance->TxBuf[Instance->TxHead], msg, sizeof(CCX_message_t));
-
-    CCX_net_push(Instance, &Instance->TxBuf[Instance->TxHead], 1);
+    CCX_net_push(Instance, &Instance->TxBuf[next_head], 1);
 
     return CCX_OK;
 }

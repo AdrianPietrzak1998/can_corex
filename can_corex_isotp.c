@@ -902,7 +902,9 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
         if (Instance->STminUsesHighRes)
         {
             CCX_HR_TIME_t current_high_res_tick = CCX_GetHighResTick();
-            if (current_high_res_tick - Instance->LastHighResTick >= Instance->STminHighResTicks)
+            CCX_HR_TIME_t hr_delta =
+                (CCX_HR_TIME_t)(current_high_res_tick - Instance->LastHighResTick);
+            if (hr_delta >= Instance->STminHighResTicks)
             {
                 CCX_ISOTP_TX_SendConsecutiveFrame(Instance);
             }
