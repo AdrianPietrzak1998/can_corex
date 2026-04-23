@@ -94,7 +94,7 @@ project/
 CAN CoreX now uses a strict split between the primary and optional high-resolution timebases:
 
 - core CAN RX/TX logic always uses the primary timebase in `ms`
-- ISO-TP uses the primary timebase for `N_As`, `N_Bs`, `N_Cs`, `N_Ar`, `N_Br`, `N_Cr`
+- ISO-TP uses the primary timebase for the enforced runtime timers `N_Bs`, `N_Cs`, and `N_Cr`
 - ISO-TP uses the HR timebase only for sub-millisecond `STmin` values (`0xF1..0xF9`)
 - bus monitoring uses the primary timebase for `successful_run_time` and long recovery delays
 - bus monitoring uses the HR timebase only when recovery delay is configured through `CCX_BUS_RECOVERY_US(x)` and `x <= 3000 us`
@@ -3182,12 +3182,14 @@ This implementation guide covers:
 - ISO-TP header selection is based on PDU length before padding; classic pads to `8`, FD pads to `TxDL` / `FC_TxDL` as appropriate
 - Current ISO-TP lifecycle helpers include `CCX_ISOTP_TX_Abort()`, `CCX_ISOTP_RX_Abort()`, `OnReceiveStart`, and delta-based `OnReceiveProgress`
 - ISO-TP timeout diagnostics are phase-specific (`TIMEOUT_FC`, `TIMEOUT_CF_TX`, `TIMEOUT_CF_RX`, `WAIT_EXCEEDED`); `CCX_ISOTP_ERROR_TIMEOUT` remains a legacy alias
-- `N_As`, `N_Ar`, and `N_Br` exist in the config structures but are currently informational only; the library enforces `N_Bs`, `N_Cs`, and `N_Cr`
+- ISO-TP enforces `N_Bs`, `N_Cs`, and `N_Cr` in the primary timebase; sub-millisecond `STmin` uses HR only when enabled
+- use the `CCX_ISOTP_*_Config_Init()` / `CCX_ISOTP_*_Config_InitFD()` helpers for new integrations instead of manually filling every field
 - Core CAN logic always uses the primary `ms` timebase; ISO-TP uses HR only for sub-millisecond `STmin`
 - Bus monitoring `successful_run_time` is always in primary `ms`; use `CCX_BUS_RECOVERY_MS(...)` / `CCX_BUS_RECOVERY_US(...)` for `recovery_delay`
 - `CCX_BUS_RECOVERY_US(x)` uses HR only for `x <= 3000 us`; above that it falls back to the base `ms` domain
 - Register the HR tick source only when your build enables HR and your configuration actually needs it
-- If hardware auto bus-off recovery is active (bxCAN ABOM, or custom platform feature), use `auto_recovery_enabled = 0` — let hardware recover, use the library only for monitoring
+- Treat RX lookup mode selection (`linear` / `binary` / `hash`) as a late optimization step, not as the default integration decision
+- If hardware auto bus-off recovery is active (bxCAN ABOM, or custom platform feature), use `auto_recovery_enabled = 0` - let hardware recover, use the library only for monitoring
 - `CCX_FD_DLC_TO_LEN[dlc]` converts raw DLC 0–15 to actual byte count; `CCX_FD_LenToDLC(n)` does the reverse
 - Bus monitoring `recovery_delay` should be ≥ the ISO 11898-1 minimum for your nominal bit rate (see `CAN_COREX_BUS_OFF_RECOVERY_*_MS` macros)
 

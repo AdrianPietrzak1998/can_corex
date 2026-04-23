@@ -1,166 +1,181 @@
-# CAN CoreX
+﻿# CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 [![Version](https://img.shields.io/badge/Version-2.2.0-blue.svg)](#changelog)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-340--344%20classic%20%7C%20516--527%20FD%20passing-success.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-352%20classic%20%7C%20529%20FD%20passing-success.svg)]()
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
 
 
 ## Overview
 
-CAN CoreX is a lightweight, modular CAN bus communication library designed for embedded systems. It provides buffer management, message routing, timeout detection, network replication, ISO-TP transport protocol, and comprehensive bus health monitoring with automatic error recovery. Version 2.2.0 keeps CAN FD ISO-TP transport with configurable `TxDL`, extended single-frame/first-frame length encoding, and payload lengths above `4095` on FD instances, while cleaning up timebase semantics: core CAN logic always uses the primary millisecond timebase, ISO-TP uses the primary timebase except for sub-millisecond `STmin`, and bus recovery can selectively use a separate high-resolution timebase when the configured recovery delay is short enough to benefit from it. RX lookup strategy selection (linear / binary / hash) remains compile-time configurable.
+CAN CoreX is built around one practical idea: most CAN applications end up maintaining the same RX parsers, TX messages, timeouts, and periodic traffic by hand. This library moves that work into explicit RX/TX tables and a small polling model.
+
+The main value of the library is:
+
+- table-driven RX handling with parser callbacks
+- table-driven periodic TX handling
+- one place for message metadata, IDs, DLC, timeouts, and callbacks
+- ISO-TP support for both classic CAN and CAN FD
+- optional bus monitoring and runtime statistics
+
+Version `2.2.0` also cleans up the timing model so the core, ISO-TP, and bus monitoring use clearly separated primary and high-resolution timebases where appropriate.
 
 ## Table of Contents
 
-1. [Key Features](#key-features)
-2. [RX Message Lookup Strategies](#rx-message-lookup-strategies)
-3. [API Reference](#api-reference)
-4. [Error Codes](#error-codes)
-5. [Data Structures](#data-structures)
-6. [Usage Examples](#usage-examples)
-7. [ISO-TP Transport Protocol](#iso-tp-transport-protocol)
-8. [Wildcard DLC Matching](#wildcard-dlc-matching)
-9. [Bus Management & Statistics](#bus-management--statistics)
+1. [Core CAN Model](#core-can-model)
+2. [ISO-TP](#iso-tp)
+3. [Bus Monitoring & Statistics](#bus-monitoring--statistics)
+4. [Quick Start](#quick-start)
+5. [API Reference](#api-reference)
+6. [Error Codes](#error-codes)
+7. [Data Structures](#data-structures)
+8. [Usage Examples](#usage-examples)
+9. [Advanced Build-Time Options](#advanced-build-time-options)
 10. [Best Practices](#best-practices)
+11. [Changelog](#changelog)
 
 ---
 
-## Key Features
+## Core CAN Model
 
-- **Circular Buffer Management**: Efficient RX and TX message buffering
-- **Configurable RX Lookup**: Compile-time selection of message lookup strategy (linear, binary search, hash table)
-- **Error Handling**: Comprehensive return codes for all operations
-- **Input Validation**: DLC and NULL pointer checks
-- **Timeout Detection**: Configurable timeout monitoring for RX messages
-- **Periodic Transmission**: Automatic periodic message sending via TX tables
-- **Network Replication**: Multi-instance message routing and replication
-- **Timestamp Tracking**: Automatic message receive time recording
-- **ISO-TP Protocol**: ISO 15765-2 transport layer for classic CAN and CAN FD instances
-- **Extended ID Support**: Full support for both Standard (11-bit) and Extended (29-bit) CAN IDs
-- **Wildcard Matching**: Accept any DLC with `CCX_DLC_ANY` in RX table
-- **CAN FD Support** (`-DCCX_ENABLE_CANFD=1`): 64-byte payloads, BRS, ESI, per-message frame format via `CCX_frame_format_t` (CLASSIC / FD / FD_BRS)
-- **FD DLC Encoding**: Non-linear DLC 0-15 map (0-8 = same as classic, 9-15 = 12/16/20/24/32/48/64 bytes); `CCX_FD_DLC_t` named constants
-- **Strict Frame-Format Matching**: All RX table entries check `FrameFormat` â€” a CLASSIC entry will not match an FD frame; `CCX_DLC_ANY` + `FrameFormat` field for format-specific wildcards
-- **Bus Management**: Automatic bus-off detection and recovery with configurable retry strategy
-- **Strict Timebase Contract**: Core CAN logic always uses primary `ms`; HR is separate and only used where it improves timing accuracy
-- **Global Statistics**: Real-time monitoring of RX/TX counters, buffer overflows, and parser calls
+The core of CAN CoreX is not a transport layer or diagnostics module. It is the RX/TX table model.
 
----
+### What You Actually Work With
 
-## RX Message Lookup Strategies
+In a typical integration you define:
 
-CAN CoreX v1.4.0 introduces compile-time configurable RX message lookup strategies, allowing you to optimize performance based on your specific use case.
+- an RX table: what IDs you accept, what DLC you expect, which parser handles the message, and whether a timeout matters
+- a TX table: what messages should be sent periodically, how often, and whether data should be refreshed just before sending
+- one `CCX_instance_t` per CAN controller or logical CAN channel
 
-### Available Strategies
+That gives you a clean split between:
 
-#### 1. Linear Search (Default)
-**No compilation flags required**
+- message definitions
+- application logic
+- hardware send/receive glue
 
-- **Best for**: Small RX tables (< 15 messages)
-- **Complexity**: O(n)
-- **Memory**: No additional overhead
-- **Requirements**: None
+### Why It Matters
 
-```bash
-gcc -c can_corex.c -Wall -Wextra
-```
+Without this model, most projects gradually accumulate:
 
-#### 2. Binary Search
-**Compilation flag**: `-DCCX_RX_SEARCH_BINARY`
+- hand-written `switch(ID)` parsing logic
+- duplicated timeout handling
+- ad-hoc periodic transmission code
+- per-message state scattered across the application
 
-- **Best for**: Medium to large RX tables (15-50+ messages)
-- **Complexity**: O(log n)
-- **Memory**: No additional overhead
-- **Requirements**: **RX table MUST be sorted by ID** (ascending order)
+With CAN CoreX, that state lives in the tables.
 
-```bash
-gcc -c can_corex.c -DCCX_RX_SEARCH_BINARY -Wall -Wextra
-```
+### Core Features
 
-**Important**: RX table must be sorted by ID:
+- **RX tables**: parser dispatch, optional timeout callback, wildcard DLC support when needed
+- **TX tables**: periodic traffic with optional pre-send parser callback
+- **Classic CAN and CAN FD**: one model, with strict `FrameFormat` matching in FD builds
+- **Buffered operation**: RX/TX queues decouple hardware callbacks from the application loop
+- **Runtime statistics**: message counters, parser calls, timeout calls, buffer overflows
+
+### Minimal Example
+
 ```c
 CCX_RX_table_t rx_table[] = {
-    {.ID = 0x100, .DLC = 8, .Parser = parser_100},  // Lowest ID first
-    {.ID = 0x200, .DLC = 8, .Parser = parser_200},
-    {.ID = 0x300, .DLC = 8, .Parser = parser_300},
-    {.ID = 0x400, .DLC = 8, .Parser = parser_400}   // Highest ID last
+    {.ID = 0x200, .DLC = 8, .IDE_flag = 0, .Parser = parse_status, .TimeOut = 1000, .TimeoutCallback = on_status_timeout}
 };
+
+CCX_TX_table_t tx_table[] = {
+    {.ID = 0x300, .Data = heartbeat_data, .DLC = 2, .IDE_flag = 0, .SendFreq = 100, .Parser = update_heartbeat}
+};
+
+CCX_tick_variable_register(&system_tick_ms);
+CCX_Init(&can1, rx_table, tx_table, 1, 1, hw_send_can_message, hw_can_bus_check, NULL);
+
+while (1) {
+    CCX_Poll(&can1);
+}
 ```
 
-#### 3. Hash Table
-**Compilation flag**: `-DCCX_RX_SEARCH_HASH`
+The point is not fewer lines at all costs. The point is that message handling becomes explicit and centralized.
 
-- **Best for**: Large RX tables (30+ messages) or real-time critical applications
-- **Complexity**: O(1) average case
-- **Memory**: Additional 128 bytes RAM (with default `CCX_RX_HASH_SIZE=64`)
-- **Requirements**: None (automatic hash table build during init)
+---
 
-```bash
-gcc -c can_corex.c -DCCX_RX_SEARCH_HASH -Wall -Wextra
-```
+## ISO-TP
 
-**Hash table size configuration** (optional):
-```bash
-# Custom hash size (power of 2 recommended)
-gcc -c can_corex.c -DCCX_RX_SEARCH_HASH -DCCX_RX_HASH_SIZE=128 -Wall -Wextra
-```
+The second big reason to use this library is the ISO-TP layer.
 
-### Hash Table Sizing Guidelines
+### Why It Is Important Here
 
-Choose hash table size based on your RX table size for optimal performance:
+The library already gives you structured CAN message handling. ISO-TP extends that model to payloads that do not fit into a single CAN frame, without forcing a separate stack or a completely different integration style.
 
-| RX Messages | Recommended Hash Size | Load Factor | Memory Cost |
-|-------------|----------------------|-------------|-------------|
-| 1-15        | 32                   | ~47%        | 64 bytes    |
-| 16-30       | 64 (default)         | ~47%        | 128 bytes   |
-| 31-60       | 128                  | ~47%        | 256 bytes   |
-| 61-120      | 256                  | ~47%        | 512 bytes   |
+### What You Get
 
-**Rule of thumb**: `HASH_SIZE â‰ˆ RxTableSize Ã— 2` (rounded to next power of 2)
+- ISO-TP for classic CAN and CAN FD
+- TX and RX instances with explicit callbacks and state handling
+- padding control
+- `TxDL` / `FC_TxDL` support for FD sessions
+- timeout diagnostics split by phase
+- abort APIs
+- support for sub-millisecond `STmin` when HR timing is enabled
 
-### Rebuilding Hash Table
+### Practical Integration Model
 
-If you modify the RX table at runtime, rebuild the hash table:
+You still work with:
+
+- one CAN CoreX instance
+- RX table entries for ISO-TP data or flow-control traffic
+- one ISO-TP TX instance and/or one ISO-TP RX instance
+- polling from the main loop
+
+That makes ISO-TP feel like an extension of the same library, not a second subsystem bolted on from somewhere else.
+
+---
+
+## Bus Monitoring & Statistics
+
+Bus monitoring is useful, but it is not the main reason to adopt the library. It is an operational layer on top of the core CAN model.
+
+What it provides:
+
+- bus state tracking: active, warning, passive, off
+- TEC/REC tracking
+- configurable recovery callback flow
+- recovery delay helpers
+- runtime counters and stats reset APIs
+
+In `2.2.0`, timing in this area is also more explicit:
+
+- `successful_run_time` uses the primary timebase
+- `recovery_delay` can use HR only for short delays via `CCX_BUS_RECOVERY_US(...)`
+
+---
+
+## Quick Start
+
+Typical integration flow:
+
+1. Register the primary tick source.
+2. Initialize one `CCX_instance_t` with RX/TX tables and hardware callbacks.
+3. Push RX frames from the ISR or driver callback.
+4. Call `CCX_Poll()` regularly from the main loop or task.
+5. If you use ISO-TP, also poll the ISO-TP TX/RX instances.
+
+Minimal sketch:
 
 ```c
-// Modify RX table
-rx_table[5].ID = 0x456;
+volatile uint32_t system_tick_ms = 0;
+CCX_instance_t can1;
 
-// Rebuild hash (only needed for hash mode, ignored otherwise)
-CCX_RX_RebuildHash(&can_instance);
+CCX_tick_variable_register(&system_tick_ms);
+
+CCX_Init(&can1, rx_table, tx_table, RX_TABLE_SIZE, TX_TABLE_SIZE,
+         hw_send_can_message, hw_can_bus_check, NULL);
+
+while (1) {
+    CCX_Poll(&can1);
+    CCX_ISOTP_TX_Poll(&isotp_tx);
+    CCX_ISOTP_RX_Poll(&isotp_rx);
+}
 ```
-
-### Performance Comparison
-
-Example lookup times for different table sizes (measured on ARM Cortex-M4 @ 168MHz):
-
-| RX Messages | Linear Search | Binary Search | Hash Table |
-|-------------|---------------|---------------|------------|
-| 10          | ~0.5 Âµs       | ~0.3 Âµs       | ~0.2 Âµs    |
-| 30          | ~1.5 Âµs       | ~0.4 Âµs       | ~0.2 Âµs    |
-| 50          | ~2.5 Âµs       | ~0.5 Âµs       | ~0.2 Âµs    |
-| 100         | ~5.0 Âµs       | ~0.6 Âµs       | ~0.2 Âµs    |
-
-### Choosing the Right Strategy
-
-**Use Linear Search** when:
-- RX table has < 15 messages
-- Code simplicity is priority
-- Memory is extremely constrained
-
-**Use Binary Search** when:
-- RX table has 15-50+ messages
-- You can guarantee sorted table
-- No extra RAM available
-
-**Use Hash Table** when:
-- RX table has 30+ messages
-- Consistent O(1) lookup required
-- You have 128-512 bytes RAM available
-- RX table may change at runtime
 
 ---
 
@@ -204,7 +219,7 @@ CCX_Status_t CCX_Init(
 - Initializes all buffer pointers to zero
 - Clears all buffers
 - Sets LastTick in tables to current time
-- In FD builds, does **not** zero `FrameFormat` in RX table entries â€” `CCX_FRAME_FORMAT_CLASSIC=0` is the natural C aggregate-initializer default; if using field-by-field assignment (no aggregate initializer), call `memset(rx_table, 0, sizeof(rx_table))` before populating
+- In FD builds, does **not** zero `FrameFormat` in RX table entries - `CCX_FRAME_FORMAT_CLASSIC=0` is the natural C aggregate-initializer default; if using field-by-field assignment (no aggregate initializer), call `memset(rx_table, 0, sizeof(rx_table))` before populating
 
 **Example**:
 ```c
@@ -222,7 +237,7 @@ CCX_Status_t status = CCX_Init(
     5, 3,
     my_send_function,
     my_bus_check,
-    NULL  /* ParserUnregMsg â€” optional unregistered message handler */
+    NULL  /* ParserUnregMsg - optional unregistered message handler */
 );
 ```
 
@@ -253,7 +268,7 @@ uint8_t len = CCX_MsgPayloadLen(&msg); // returns actual byte count
 void CCX_RX_RebuildHash(CCX_instance_t *Instance);
 ```
 
-**Description**: Rebuilds the internal hash table for RX message lookup (only when compiled with `CCX_RX_SEARCH_HASH`).
+**Description**: Rebuilds the internal hash table for RX lookup when the hash mode is enabled.
 
 **Parameters**:
 - `Instance`: Pointer to CAN instance
@@ -276,8 +291,6 @@ rx_table[5].Parser = new_parser;
 // Rebuild hash to reflect changes
 CCX_RX_RebuildHash(&can_instance);
 ```
-
-**Performance**: O(n) where n = RxTableSize. Typical rebuild time: ~10-50 Ã‚Âµs depending on table size.
 
 ---
 
@@ -498,7 +511,7 @@ typedef struct {
     uint8_t Data[8];      // Message data (0-8 bytes)
     uint8_t DLC : 4;      // Data Length Code (0-8)
     uint8_t IDE_flag : 1; // 0=Standard, 1=Extended ID
-} CCX_message_t;          // sizeof == 16
+} CCX_message_t;
 ```
 
 **FD build** (`CCX_ENABLE_CANFD=1`):
@@ -513,7 +526,7 @@ typedef struct {
 } CCX_message_t;
 ```
 
-**`CCX_FD_DLC_t` enum** (FD build only) â€” named DLC constants:
+**`CCX_FD_DLC_t` enum** (FD build only) - named DLC constants:
 ```c
 typedef enum {
     CCX_FD_DLC_0B  = 0,   CCX_FD_DLC_1B  = 1,
@@ -554,7 +567,7 @@ typedef struct {
     uint32_t ID;             // Expected message ID
     uint8_t DLC : 5;         // Expected DLC (0-15); CCX_DLC_ANY (16) = accept any
     uint8_t IDE_flag : 1;    // use CCX_ide_t: CCX_ID_STANDARD / CCX_ID_EXTENDED
-    uint8_t FrameFormat : 2; // use CCX_frame_format_t: CLASSICâ†’match classic; FD/FD_BRSâ†’match FD
+    uint8_t FrameFormat : 2; // use CCX_frame_format_t: CLASSIC->match classic; FD/FD_BRS->match FD
     void *UserData;          // User context pointer passed to Parser and TimeoutCallback
     CCX_TIME_t TimeOut;      // Timeout period (0 = disabled)
     void (*Parser)(const CCX_instance_t *Instance,
@@ -573,7 +586,7 @@ typedef struct {
 - Provide `TimeoutCallback` to handle timeout events (optional)
 - `LastTick` is automatically updated by library
 - In FD builds: `FrameFormat` defaults to `CCX_FRAME_FORMAT_CLASSIC=0` via C aggregate initialization (`{.ID=..., .DLC=...}`); if using field-by-field assignment, call `memset(rx_table, 0, sizeof(rx_table))` first
-- **All** entries check `FrameFormat` â€” a CLASSIC entry will not match an FD frame and vice versa
+- **All** entries check `FrameFormat` - a CLASSIC entry will not match an FD frame and vice versa
 
 ---
 
@@ -1188,17 +1201,17 @@ CCX_RX_table_t rx_table[] = {
     {.ID = 0x400, .DLC = CCX_DLC_ANY, .FrameFormat = CCX_FRAME_FORMAT_CLASSIC, .Parser = classic_any_parser},
 };
 CCX_Init(&can, rx_table, NULL, 3, 0, send_fn, bus_fn, NULL);
-// FrameFormat is part of the aggregate initializer â€” no post-Init fixup needed
+// FrameFormat is part of the aggregate initializer - no post-Init fixup needed
 ```
 
 `FrameFormat` uses the `CCX_frame_format_t` enum values:
-- `CCX_FRAME_FORMAT_CLASSIC` (0) â€” matches classic (non-FD) frames only
-- `CCX_FRAME_FORMAT_FD` (1) â€” matches FD frames (any BRS setting)
-- `CCX_FRAME_FORMAT_FD_BRS` (2) â€” matches FD frames with BRS
+- `CCX_FRAME_FORMAT_CLASSIC` (0) - matches classic (non-FD) frames only
+- `CCX_FRAME_FORMAT_FD` (1) - matches FD frames (any BRS setting)
+- `CCX_FRAME_FORMAT_FD_BRS` (2) - matches FD frames with BRS
 
 ### Exact-DLC entries
 
-All entries check `FrameFormat` â€” a CLASSIC entry will not match an FD frame carrying the same DLC, and vice versa.
+All entries check `FrameFormat` - a CLASSIC entry will not match an FD frame carrying the same DLC, and vice versa.
 
 ### Use Cases
 
@@ -1216,9 +1229,9 @@ All entries check `FrameFormat` â€” a CLASSIC entry will not match an FD fr
 
 ---
 
-## Bus Management & Statistics
+## Detailed Bus Management & Statistics
 
-CAN CoreX v1.3.0 introduces comprehensive bus health monitoring and statistics tracking.
+CAN CoreX includes comprehensive bus health monitoring and statistics tracking.
 
 ### Global Statistics
 
@@ -1405,6 +1418,26 @@ while (1) {
 
 ---
 
+## Advanced Build-Time Options
+
+Most users should stay with the default build and only decide whether CAN FD is needed.
+
+Main build switch:
+
+- `CCX_ENABLE_CANFD=1` enables CAN FD message support, FD DLC helpers, FD-aware RX/TX tables, and FD ISO-TP sessions
+
+Less common build-time options:
+
+- `CCX_RX_SEARCH_BINARY` switches RX lookup to binary search and requires the RX table to stay sorted by CAN ID
+- `CCX_RX_SEARCH_HASH` enables hashed RX lookup and `CCX_RX_RebuildHash()` for runtime RX table changes
+- `CCX_TICK_FROM_FUNC` and `CCX_HR_TICK_FROM_FUNC` switch tick registration from variables to callbacks
+- custom primary / HR tick widths can be selected with `CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT16/32/64` and `CCX_HR_TIME_BASE_TYPE_CUSTOM_IS_UINT16/32/64`
+
+Recommendation:
+
+- treat RX lookup mode selection as an advanced optimization knob
+- choose it only when you have a measured reason, not as part of the default integration path
+
 ## Best Practices
 
 ### 1. Always Register Tick Source First
@@ -1578,7 +1611,7 @@ Mozilla Public License 2.0 - see LICENSE file for details.
   - `uint8_t` timebases are rejected because their range is too small for this library
   - old signed timebase selection macros are rejected with a hard compile-time error because they were a historical bug and break timeout arithmetic
 - **ISO-TP timing cleanup**:
-  - `N_As`, `N_Bs`, `N_Cs`, `N_Ar`, `N_Br`, `N_Cr` now use the primary `ms` timebase
+  - enforced ISO-TP runtime timers `N_Bs`, `N_Cs`, and `N_Cr` use the primary `ms` timebase
   - HR timing is used only for sub-millisecond `STmin` values (`0xF1..0xF9`)
   - in single-timebase builds, incoming FC `STmin` values in the `0xF1..0xF9` range are rounded up to the primary `ms` tick
 - **Bus monitoring timing cleanup**:
@@ -1589,20 +1622,20 @@ Mozilla Public License 2.0 - see LICENSE file for details.
   - `500 kbps` recovery constant corrected to `2816 us`
 - **Testing**:
   - added explicit bus recovery threshold coverage for `2999 us`, `3000 us`, and `3001 us`
-  - current verified totals: classic linear `351`, FD linear `528`
+  - current verified totals: classic linear `352`, FD linear `529`
 
 ### Previous Release: v2.1.0 (2026-04-19)
-- **CAN FD Support** (`-DCCX_ENABLE_CANFD=1`): 64-byte payloads, BRS, ESI â€” zero overhead when disabled
-  - `CCX_frame_format_t` (3 values): `CCX_FRAME_FORMAT_CLASSIC=0`, `CCX_FRAME_FORMAT_FD=1`, `CCX_FRAME_FORMAT_FD_BRS=2` â€” replaces separate `FDF:1 + BRS:1` bitfields; present in `CCX_message_t`, `CCX_RX_table_t`, `CCX_TX_table_t`; per-message/per-entry (not per-instance)
-  - `CCX_ide_t` enum: `CCX_ID_STANDARD=0`, `CCX_ID_EXTENDED=1` â€” named constants for all `IDE_flag` fields
+- **CAN FD Support** (`-DCCX_ENABLE_CANFD=1`): 64-byte payloads, BRS, ESI - zero overhead when disabled
+  - `CCX_frame_format_t` (3 values): `CCX_FRAME_FORMAT_CLASSIC=0`, `CCX_FRAME_FORMAT_FD=1`, `CCX_FRAME_FORMAT_FD_BRS=2` - replaces separate `FDF:1 + BRS:1` bitfields; present in `CCX_message_t`, `CCX_RX_table_t`, `CCX_TX_table_t`; per-message/per-entry (not per-instance)
+  - `CCX_ide_t` enum: `CCX_ID_STANDARD=0`, `CCX_ID_EXTENDED=1` - named constants for all `IDE_flag` fields
   - `CCX_RX_table_t` extended: 5-bit `DLC` field (sentinel `CCX_DLC_ANY=16`); `FrameFormat` controls which format the wildcard matches
-  - **All** RX entries check `FrameFormat` â€” CLASSIC entry will not match FD frame and vice versa
-  - `CCX_Init` does **not** zero `FrameFormat` â€” `CCX_FRAME_FORMAT_CLASSIC=0` is the C aggregate-init default; field-by-field tables require `memset(rx_table, 0, sizeof(rx_table))` before population
-  - `CCX_Init_Ex()` **removed** â€” no per-instance frame format; use `CCX_Init()` for all instances
-  - `CCX_FD_DLC_t` enum: named constants `CCX_FD_DLC_0B` â€¦ `CCX_FD_DLC_64B`
-  - `CCX_FD_LenToDLC()` / `CCX_MsgPayloadLen()`: helpers for FD length â†” DLC conversion
+  - **All** RX entries check `FrameFormat` - CLASSIC entry will not match FD frame and vice versa
+  - `CCX_Init` does **not** zero `FrameFormat` - `CCX_FRAME_FORMAT_CLASSIC=0` is the C aggregate-init default; field-by-field tables require `memset(rx_table, 0, sizeof(rx_table))` before population
+  - `CCX_Init_Ex()` **removed** - no per-instance frame format; use `CCX_Init()` for all instances
+  - `CCX_FD_DLC_t` enum: named constants `CCX_FD_DLC_0B` ... `CCX_FD_DLC_64B`
+  - `CCX_FD_LenToDLC()` / `CCX_MsgPayloadLen()`: helpers for FD length <-> DLC conversion
   - `CCX_FD_DLC_TO_LEN[16]` LUT: compile-time array mapping DLC codes to byte lengths
-- **Network layer** (`can_corex_net`): no FD-to-classic frame filtering â€” FD frames replicate freely; `dropped_mixed` stat removed
+- **Network layer** (`can_corex_net`): no FD-to-classic frame filtering - FD frames replicate freely; `dropped_mixed` stat removed
 - **ISO-TP** (`can_corex_isotp`):
   - unified classic/FD API
   - `FrameFormat` selects classic / FD / FD_BRS session behavior
@@ -1623,12 +1656,28 @@ Mozilla Public License 2.0 - see LICENSE file for details.
   - current verified totals: classic linear/binary `340`, FD linear/binary `516`, FD hash `520`
 - **Breaking Changes** (FD builds only): `FDF`/`BRS` fields replaced by `FrameFormat`; `CCX_Init_Ex` removed; all RX entries now enforce FrameFormat matching
 - **Breaking Changes** (FD ISO-TP users): ISO-TP length-related APIs now use `CCX_ISOTP_Length_t`
-- **No breaking changes** for classic (`CCX_ENABLE_CANFD=0`) builds â€” fully backward compatible with v1.4.x
+- **No breaking changes** for classic (`CCX_ENABLE_CANFD=0`) builds - fully backward compatible with v1.4.x
+
+### Previous Release: v2.0.0 (2026-04-18)
+- **CAN FD Support** (`-DCCX_ENABLE_CANFD=1`): 64-byte payloads, BRS, ESI support added to the CAN core
+  - `CCX_frame_format_t` introduced with `CCX_FRAME_FORMAT_CLASSIC`, `CCX_FRAME_FORMAT_FD`, and `CCX_FRAME_FORMAT_FD_BRS`
+  - `CCX_message_t`, `CCX_RX_table_t`, and `CCX_TX_table_t` extended for FD operation
+  - strict `FrameFormat` matching added on RX entries
+  - `CCX_FD_DLC_t`, `CCX_FD_LenToDLC()`, `CCX_MsgPayloadLen()`, and `CCX_FD_DLC_TO_LEN[16]` added for FD DLC handling
+- **Network layer** (`can_corex_net`): FD frames can be replicated between instances; no FD-to-classic filtering in the network layer
+- **ISO-TP status in 2.0.0**:
+  - classic ISO-TP sessions on FD-capable instances were supported
+  - FD payload ISO-TP was **not** implemented yet and returned `CCX_ISOTP_ERROR_FD_NOT_SUPPORTED`
+- **Test suite**: first FD test coverage added alongside the existing classic builds
+- **Breaking Changes** (FD builds only):
+  - `FDF` / `BRS` bitfields replaced by `FrameFormat`
+  - `CCX_Init_Ex()` removed
+  - all RX entries began enforcing frame-format matching
 
 ### v1.4.4 (2026-04-01)
 - **Bug Fixes**:
   - **ISO-TP N_Cs timeout logic (CRITICAL)**: Fixed N_Cs timeout check incorrectly nested inside STmin condition
-    - When `STmin > N_Cs`, the timeout never fired â€” CF was sent before N_Cs could trigger
+    - When `STmin > N_Cs`, the timeout never fired - CF was sent before N_Cs could trigger
     - When `N_Cs = 0`, any elapsed tick immediately triggered a false timeout instead of sending CF
     - N_Cs is now checked independently of STmin, with `N_Cs == 0` treated as disabled
   - **ISO-TP FC.WAIT LastTick ordering (MODERATE)**: Fixed `LastTick` being updated after `OnError` callback when FC.WAIT frames are exhausted
@@ -1638,12 +1687,12 @@ Mozilla Public License 2.0 - see LICENSE file for details.
     - Re-adding the last node in the linked list set `node->next = node`, creating a cycle
     - Any subsequent `CCX_net_push()` call would then hang in an infinite loop
     - Added duplicate check for the final node after the traversal loop
-- **Test Coverage**: Added 4 previously missing tests â€” 100% of public API now explicitly tested
-  - `CCX_BusMonitor_GetState()` â€” all states (ACTIVE, WARNING, PASSIVE, OFF) and NULL safety
-  - `CCX_BusMonitor_ResetStats()` â€” counter zeroing, state preservation, NULL safety
-  - `CCX_RX_RebuildHash()` â€” dynamic table modification and hash rebuild in hash mode; no-op in other modes
-  - ISO-TP 400-byte payload â€” multi-frame segmentation and data integrity for large transfers
-- **Breaking Changes**: None â€” all changes are internal fixes, fully backward compatible
+- **Test Coverage**: Added 4 previously missing tests - 100% of public API now explicitly tested
+  - `CCX_BusMonitor_GetState()` - all states (ACTIVE, WARNING, PASSIVE, OFF) and NULL safety
+  - `CCX_BusMonitor_ResetStats()` - counter zeroing, state preservation, NULL safety
+  - `CCX_RX_RebuildHash()` - dynamic table modification and hash rebuild in hash mode; no-op in other modes
+  - ISO-TP 400-byte payload - multi-frame segmentation and data integrity for large transfers
+- **Breaking Changes**: None - all changes are internal fixes, fully backward compatible
 - **Testing**: 275/275 tests passing (linear, binary); 279/279 tests passing (hash)
 
 ### Previous Release: v1.4.3 (2026-02-13)
@@ -1653,14 +1702,14 @@ Mozilla Public License 2.0 - see LICENSE file for details.
   - FC DLC without padding corrected from 4 to 3 bytes
   - **Previous versions were incompatible with all external ISO-TP implementations** (CANoe, PCAN, any standards-compliant ECU)
   - Internal loopback tests passed before because both TX and RX had the same bug
-- **Custom Time Type Fix**: Fixed typedef `CC_TIME_t` â†’ `CCX_TIME_t` in `can_corex.h`
+- **Custom Time Type Fix**: Fixed typedef `CC_TIME_t` -> `CCX_TIME_t` in `can_corex.h`
   - Any user defining `CCX_TIME_BASE_TYPE_CUSTOM` would get a compilation error in v1.4.0-v1.4.2
 - **Header Cleanup**: Removed leftover `#define DCCX_RX_SEARCH_HASH` from `can_corex.h`
 - **Network RX Replication Fix**: `CCX_net_RX_PushMsg` now sets `RxReceivedTick`
-  - Timeout detection for messages received via network replication (`CCX_NET_TX_RX_REPLICATION`) was broken â€” `LastTick` was never updated because `RxReceivedTick` stayed at 0
+  - Timeout detection for messages received via network replication (`CCX_NET_TX_RX_REPLICATION`) was broken - `LastTick` was never updated because `RxReceivedTick` stayed at 0
 - **New Test**: ISO 15765-2 FC frame layout validation with non-zero BS and STmin values
   - Verifies byte-level FC format, TX-side parsing of BS/STmin, and end-to-end transfer with BS=5
-- **Breaking Changes**: ISO-TP FC wire format changed â€” **not backward compatible** with v1.2.0-v1.4.2 ISO-TP peers
+- **Breaking Changes**: ISO-TP FC wire format changed - **not backward compatible** with v1.2.0-v1.4.2 ISO-TP peers
   - Now compatible with all standards-compliant ISO-TP implementations
 - **Testing**: 253/253 tests passing across all three search modes (linear, binary, hash)
 
@@ -1794,9 +1843,10 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 - **Performance**: Reduced overhead - timeout callbacks now only called when needed per message
 
 ### Initial Release: v1.0.0 (2025-04-26)
-- ðŸŽ‰ Initial release
+- Initial release
 
 ---
+
 
 
 
