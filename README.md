@@ -1,10 +1,11 @@
 ﻿# CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-2.2.0-blue.svg)](#changelog)
+[![Version](https://img.shields.io/badge/Version-2.2.1-blue.svg)](#changelog)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
 [![Tests](https://img.shields.io/badge/Tests-352%20classic%20%7C%20529%20FD%20passing-success.svg)]()
+[![ISO-TP validated with PEAK PCAN-ISO-TP API](https://img.shields.io/badge/ISO--TP-validated%20with%20PEAK%20PCAN--ISO--TP%20API-informational.svg)](#iso-tp)
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
 
@@ -21,7 +22,7 @@ The main value of the library is:
 - ISO-TP support for both classic CAN and CAN FD
 - optional bus monitoring and runtime statistics
 
-Version `2.2.0` also cleans up the timing model so the core, ISO-TP, and bus monitoring use clearly separated primary and high-resolution timebases where appropriate.
+Version `2.2.1` keeps the `2.2.0` timing cleanup and additionally splits bus monitoring into its own public module header, `can_corex_bus.h`.
 
 ## Table of Contents
 
@@ -128,6 +129,8 @@ You still work with:
 
 That makes ISO-TP feel like an extension of the same library, not a second subsystem bolted on from somewhere else.
 
+ISO-TP interoperability was additionally validated with PEAK PCAN-ISO-TP API tooling.
+
 ---
 
 ## Bus Monitoring & Statistics
@@ -146,6 +149,12 @@ In `2.2.0`, timing in this area is also more explicit:
 
 - `successful_run_time` uses the primary timebase
 - `recovery_delay` can use HR only for short delays via `CCX_BUS_RECOVERY_US(...)`
+
+Header organization in `2.2.1`:
+
+- `can_corex.h` remains the main public header
+- `can_corex_bus.h` contains bus-monitoring types, macros, and API declarations
+- including only `can_corex.h` remains sufficient for normal integrations
 
 ---
 
@@ -1600,7 +1609,18 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v2.2.0 (2026-04-21)
+### Current Release: v2.2.1 (2026-04-24)
+- **Bus-monitoring header split**:
+  - bus-monitoring public types, macros, and API declarations moved from `can_corex.h` to `can_corex_bus.h`
+  - `can_corex.h` still includes `can_corex_bus.h`, so existing integrations that include only `can_corex.h` remain valid
+- **Bus-monitoring implementation split**:
+  - bus-monitoring runtime logic now lives in `can_corex_bus.c`
+  - `can_corex.c` keeps core RX/TX runtime and global statistics
+- **Documentation**:
+  - README and implementation guide updated to reflect the new public module layout
+- **Breaking Changes**: None for normal users of the public API
+
+### Previous Release: v2.2.0 (2026-04-21)
 - **Timebase contract cleanup**:
   - core CAN RX/TX logic now always uses the primary `ms` timebase
   - optional HR timing is a separate domain with its own type family and independent tick registration
