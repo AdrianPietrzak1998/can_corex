@@ -211,58 +211,6 @@ typedef CCX_TIME_t CCX_HR_TIME_t;
 #define CCX_HR_TIME(us) ((CCX_HR_TIME_t)(us))
 #endif
 
-typedef struct
-{
-    CCX_HR_TIME_t HighResDelay;
-    CCX_TIME_t BaseDelay;
-    uint8_t UsesHighRes;
-} CCX_BusRecoveryDelay_t;
-
-#ifdef CCX_DISABLE_HIGH_RES_TIMEBASE
-#define CCX_BUS_RECOVERY_MS(ms)                                                                                        \
-    ((CCX_BusRecoveryDelay_t){.HighResDelay = 0U, .BaseDelay = (CCX_TIME_t)(ms), .UsesHighRes = 0U})
-#define CCX_BUS_RECOVERY_US(us)                                                                                        \
-    ((CCX_BusRecoveryDelay_t){                                                                                         \
-        .HighResDelay = 0U, .BaseDelay = (CCX_TIME_t)CCX_INTERNAL_MS_FROM_US_CEIL(us), .UsesHighRes = 0U})
-#else
-#define CCX_BUS_RECOVERY_MS(ms)                                                                                        \
-    ((CCX_BusRecoveryDelay_t){.HighResDelay = 0U, .BaseDelay = (CCX_TIME_t)(ms), .UsesHighRes = 0U})
-#define CCX_BUS_RECOVERY_US(us)                                                                                        \
-    ((CCX_BusRecoveryDelay_t){.HighResDelay = ((us) <= 3000U) ? CCX_HR_TIME(us) : 0U,                                  \
-                              .BaseDelay = (CCX_TIME_t)CCX_INTERNAL_MS_FROM_US_CEIL(us),                               \
-                              .UsesHighRes = (uint8_t)((us) <= 3000U)})
-#endif
-
-/* ============================================================
- * ISO 11898-1 BUS-OFF recovery timing
- *
- * Condition:
- *   128 x 11 recessive bits = 1408 bits
- *
- * Classic CAN constants are expressed directly in milliseconds because they
- * do not benefit from the HR domain. Short recovery delays can still be
- * expressed through CCX_BUS_RECOVERY_US(us). Values up to 3 ms use the HR
- * timebase when available; longer values are tracked in the base time domain.
- * The _MS suffix is kept for API stability.
- * ============================================================ */
-
-#define CAN_COREX_BUS_OFF_RECOVERY_10KBPS_MS CCX_BUS_RECOVERY_MS(141U)
-#define CAN_COREX_BUS_OFF_RECOVERY_20KBPS_MS CCX_BUS_RECOVERY_MS(71U)
-#define CAN_COREX_BUS_OFF_RECOVERY_50KBPS_MS CCX_BUS_RECOVERY_MS(29U)
-#define CAN_COREX_BUS_OFF_RECOVERY_83K3BPS_MS CCX_BUS_RECOVERY_MS(17U)
-#define CAN_COREX_BUS_OFF_RECOVERY_100KBPS_MS CCX_BUS_RECOVERY_MS(15U)
-#define CAN_COREX_BUS_OFF_RECOVERY_125KBPS_MS CCX_BUS_RECOVERY_MS(12U)
-#define CAN_COREX_BUS_OFF_RECOVERY_250KBPS_MS CCX_BUS_RECOVERY_MS(6U)
-#define CAN_COREX_BUS_OFF_RECOVERY_500KBPS_MS CCX_BUS_RECOVERY_US(2816U)
-#define CAN_COREX_BUS_OFF_RECOVERY_800KBPS_MS CCX_BUS_RECOVERY_US(1760U)
-#define CAN_COREX_BUS_OFF_RECOVERY_1000KBPS_MS CCX_BUS_RECOVERY_US(1408U)
-
-#if CCX_ENABLE_CANFD
-#define CAN_COREX_BUS_OFF_RECOVERY_FD_2M_MS CCX_BUS_RECOVERY_US(704U)
-#define CAN_COREX_BUS_OFF_RECOVERY_FD_5M_MS CCX_BUS_RECOVERY_US(282U)
-#define CAN_COREX_BUS_OFF_RECOVERY_FD_8M_MS CCX_BUS_RECOVERY_US(176U)
-#endif
-
 /**
  * @brief Enumeration indicating the status of the CAN bus.
  *
@@ -278,26 +226,6 @@ typedef enum
     CCX_BUS_BUSY = 0,
     CCX_BUS_FREE
 } CCX_BusIsFree_t;
-
-/**
- * @brief CAN bus state according to ISO 11898-1
- *
- * Represents the current error state of the CAN controller.
- * State transitions are based on Transmit Error Counter (TEC) and Receive Error Counter (REC).
- *
- * Values:
- * - CCX_BUS_STATE_ACTIVE: Error Active (TEC < 96 && REC < 96) - normal operation
- * - CCX_BUS_STATE_WARNING: Error Warning (TEC > 96 || REC > 96) - degraded performance
- * - CCX_BUS_STATE_PASSIVE: Error Passive (TEC > 127 || REC > 127) - cannot send active error frames
- * - CCX_BUS_STATE_OFF: Bus Off (TEC > 255) - disconnected from bus
- */
-typedef enum
-{
-    CCX_BUS_STATE_ACTIVE = 0,
-    CCX_BUS_STATE_WARNING,
-    CCX_BUS_STATE_PASSIVE,
-    CCX_BUS_STATE_OFF
-} CCX_BusState_t;
 
 /**
  * @brief CAN identifier type (standard 11-bit or extended 29-bit)
@@ -329,25 +257,6 @@ typedef enum
     CCX_FRAME_FORMAT_FD_BRS = 2,  /**< CAN FD with bit-rate switch (BRS=1) */
 } CCX_frame_format_t;
 #endif
-
-/**
- * @brief CAN error counters from hardware controller
- *
- * According to ISO 11898-1, CAN controllers maintain two error counters:
- * - TEC (Transmit Error Counter): Incremented on transmission errors
- * - REC (Receive Error Counter): Incremented on reception errors
- *
- * These counters determine the bus state:
- * - Error Active: TEC < 96 && REC < 96
- * - Error Warning: TEC > 96 || REC > 96
- * - Error Passive: TEC > 127 || REC > 127
- * - Bus Off: TEC > 255
- */
-typedef struct
-{
-    uint8_t TEC; /**< Transmit Error Counter (0-255) */
-    uint8_t REC; /**< Receive Error Counter (0-255) */
-} CCX_ErrorCounters_t;
 
 /**
  * @brief Global statistics for CAN instance
@@ -416,89 +325,7 @@ typedef struct
 
 typedef struct CCX_instance_t CCX_instance_t;
 
-/**
- * @brief Bus monitoring statistics
- *
- * Tracks detailed bus health metrics including error states and recovery attempts.
- * Statistics are accumulated over the lifetime of the bus monitor.
- */
-typedef struct
-{
-    uint32_t bus_off_count;                  /**< Number of bus-off events */
-    uint32_t error_warning_count;            /**< Number of error warning events (TEC/REC > 96) */
-    uint32_t error_passive_count;            /**< Number of error passive events (TEC/REC > 127) */
-    CCX_TIME_t last_bus_off_time;            /**< Timestamp of last bus-off occurrence in base ticks */
-    CCX_TIME_t total_bus_off_duration;       /**< Cumulative time spent in bus-off state in base ticks */
-    CCX_ErrorCounters_t error_counters;      /**< Current TEC/REC values from hardware */
-    CCX_ErrorCounters_t peak_error_counters; /**< Peak TEC/REC values since initialization */
-} CCX_BusStats_t;
-
-/**
- * @brief Bus monitor configuration and state
- *
- * Provides automatic bus-off detection and recovery with configurable retry strategy.
- * Recovery process has two phases:
- * 1. Active recovery: Attempts recovery up to max_recovery_attempts times
- * 2. Grace period: After max attempts, waits successful_run_time before trying again
- *
- * Example usage:
- * @code
- * CCX_BusMonitor_t bus_monitor;
- *
- * CCX_BusMonitor_Init(
- *     &can_instance,
- *     &bus_monitor,
- *     my_get_bus_state,        // Read state from hardware
- *     my_get_error_counters,   // Read TEC/REC
- *     my_request_recovery,     // Trigger recovery
- *     CCX_BUS_RECOVERY_MS(10), // recovery_delay: 10ms between attempts
- *     60000,                   // successful_run_time: 60s grace period
- *     1,       // auto_recovery_enabled
- *     5        // max_recovery_attempts: 5 tries before grace period
- * );
- *
- * bus_monitor.OnBusStateChange = my_state_callback;
- * bus_monitor.OnRecoveryFailed = my_failed_callback;
- * @endcode
- */
-typedef struct
-{
-    CCX_BusState_t current_state; /**< Current bus state */
-    CCX_BusStats_t stats;         /**< Accumulated statistics */
-
-    /* Recovery parameters */
-    CCX_BusRecoveryDelay_t
-        recovery_delay;             /**< Delay between recovery attempts, in base or HR ticks depending on macro used */
-    CCX_TIME_t successful_run_time; /**< Time to run successfully before resetting counter, in base ticks */
-    uint8_t auto_recovery_enabled;  /**< Enable automatic bus-off recovery */
-    uint8_t max_recovery_attempts;  /**< Max attempts before grace period (0 = unlimited) */
-    uint8_t recovery_attempts;      /**< Current recovery attempt counter */
-
-    /* Internal state */
-    CCX_TIME_t recovery_start_time; /**< Base-domain timestamp for current recovery cycle */
-    CCX_HR_TIME_t
-        recovery_start_time_hr; /**< HR-domain timestamp for current recovery cycle when sub-ms recovery is used */
-    CCX_TIME_t last_successful_recovery; /**< When last recovery succeeded */
-    CCX_TIME_t bus_off_entry_time;       /**< When bus-off state was entered */
-    uint8_t in_grace_period;             /**< 1 = waiting in grace period after max attempts */
-    CCX_TIME_t grace_period_start;       /**< When grace period started */
-
-    /* Hardware interface - user implements these */
-    CCX_BusState_t (*GetBusState)(const CCX_instance_t *Instance); /**< Read bus state from hardware */
-    void (*GetErrorCounters)(const CCX_instance_t *Instance,
-                             CCX_ErrorCounters_t *Counters); /**< Read TEC/REC (can be NULL) */
-    void (*RequestRecovery)(const CCX_instance_t *Instance); /**< Trigger recovery in hardware */
-
-    /* User callbacks */
-    void (*OnBusStateChange)(CCX_instance_t *Instance, CCX_BusState_t OldState, CCX_BusState_t NewState,
-                             void *UserData); /**< Called on state transition */
-    void (*OnRecoveryAttempt)(CCX_instance_t *Instance, uint8_t AttemptNumber,
-                              void *UserData);                          /**< Called before each recovery attempt */
-    void (*OnRecoveryFailed)(CCX_instance_t *Instance, void *UserData); /**< Called when max attempts reached */
-    void (*OnErrorCountersUpdate)(CCX_instance_t *Instance, const CCX_ErrorCounters_t *Counters,
-                                  void *UserData); /**< Called when TEC/REC updated */
-    void *UserData;                                /**< User context pointer for callbacks */
-} CCX_BusMonitor_t;
+#include "can_corex_bus.h"
 
 /**
  * @brief CAN RX table entry structure
@@ -694,80 +521,6 @@ extern CCX_HR_TIME_t *CCX_high_res_tick;
 #define CCX_GetHighResTick() ((CCX_high_res_tick != NULL) ? (*CCX_high_res_tick) : ((CCX_HR_TIME_t)0))
 #endif
 #endif
-
-/* ========================================================================
- * BUS MONITORING API (v1.3.0)
- * ======================================================================== */
-
-/**
- * @brief Initialize bus monitoring for a CAN instance
- *
- * Enables automatic bus-off detection and recovery with configurable retry strategy.
- * The recovery process works in two phases:
- * 1. Active recovery: Attempts recovery up to max_recovery_attempts times with recovery_delay between attempts
- * 2. Grace period: After max attempts, waits successful_run_time before trying again
- *
- * @param Instance CAN instance to monitor
- * @param Monitor Bus monitor structure (must persist during operation)
- * @param GetBusState Function to read current bus state from hardware (required)
- * @param GetErrorCounters Function to read TEC/REC from hardware (optional, can be NULL)
- * @param RequestRecovery Function to trigger bus-off recovery in hardware (required)
- * @param recovery_delay Delay between recovery attempts selected by `CCX_BUS_RECOVERY_MS(...)` or
- * `CCX_BUS_RECOVERY_US(...)`
- * @param successful_run_time Time to run successfully before resetting recovery counter in base ticks
- * @param auto_recovery_enabled 1 = enable automatic recovery, 0 = manual recovery only
- * @param max_recovery_attempts Maximum recovery attempts before entering grace period (0 = unlimited)
- * @return CCX_OK on success, CCX_NULL_PTR if Instance/Monitor/callbacks are NULL
- *
- * @note After initialization, CCX_Poll() automatically calls CCX_BusMonitor_Update()
- * @note Set callbacks in Monitor structure after initialization (OnBusStateChange, OnRecoveryFailed, etc.)
- *
- * @code
- * CCX_BusMonitor_t bus_monitor;
- * CCX_BusMonitor_Init(&can_inst, &bus_monitor, my_get_state, my_get_tec_rec,
- *                     my_recovery, CCX_BUS_RECOVERY_MS(10), 60000, 1, 5);
- * bus_monitor.OnBusStateChange = my_callback;
- * @endcode
- */
-CCX_Status_t CCX_BusMonitor_Init(CCX_instance_t *Instance, CCX_BusMonitor_t *Monitor,
-                                 CCX_BusState_t (*GetBusState)(const CCX_instance_t *),
-                                 void (*GetErrorCounters)(const CCX_instance_t *, CCX_ErrorCounters_t *),
-                                 void (*RequestRecovery)(const CCX_instance_t *), CCX_BusRecoveryDelay_t recovery_delay,
-                                 CCX_TIME_t successful_run_time, uint8_t auto_recovery_enabled,
-                                 uint8_t max_recovery_attempts);
-
-/**
- * @brief Manually trigger bus-off recovery
- *
- * Resets recovery attempt counter and immediately triggers recovery.
- * This is useful during grace period to retry earlier than grace period timeout.
- *
- * @param Instance CAN instance
- * @return CCX_OK on success
- * @return CCX_NULL_PTR if Instance or BusMonitor is NULL
- * @return CCX_WRONG_ARG if bus is not in bus-off state
- *
- * @note Calling this during grace period resets the counter and restarts active recovery phase
- */
-CCX_Status_t CCX_BusMonitor_TriggerRecovery(CCX_instance_t *Instance);
-
-/**
- * @brief Get current bus state
- *
- * @param Instance CAN instance
- * @return Current bus state, or CCX_BUS_STATE_ACTIVE if monitoring is disabled
- */
-CCX_BusState_t CCX_BusMonitor_GetState(const CCX_instance_t *Instance);
-
-/**
- * @brief Reset bus monitoring statistics
- *
- * Resets all counters in CCX_BusStats_t to zero.
- * Does not affect current bus state or recovery state.
- *
- * @param Instance CAN instance
- */
-void CCX_BusMonitor_ResetStats(CCX_instance_t *Instance);
 
 /**
  * @brief Get global statistics

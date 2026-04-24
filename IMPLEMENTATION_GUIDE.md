@@ -1,6 +1,6 @@
 # CAN CoreX Implementation Guide
 
-**Version:** 2.2.0  
+**Version:** 2.2.1  
 **Author:** Adrian Pietrzak  
 **Date:** April 2026
 
@@ -50,6 +50,15 @@ project/
     ├── can_corex_isotp.c
     └── can_corex_isotp.h
 ```
+
+In `2.2.1`, the CAN CoreX library also includes the public bus-monitoring module files
+`can_corex_bus.c` and `can_corex_bus.h`.
+
+Header organization:
+
+- `can_corex.h` remains the main umbrella header
+- `can_corex_bus.h` contains bus-monitoring declarations
+- projects may continue to include only `can_corex.h`
 
 ### File Relationships Diagram
 
