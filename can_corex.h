@@ -281,6 +281,8 @@ typedef struct
     uint32_t tx_buffer_overflows; /**< Number of times TX buffer was full */
     uint32_t parser_calls_count;  /**< Total number of parser function invocations */
     uint32_t timeout_calls_count; /**< Total number of timeout callback invocations */
+    uint16_t peak_rx_depth;       /**< Highest RX buffer depth observed since stats reset */
+    uint16_t peak_tx_depth;       /**< Highest TX buffer depth observed since stats reset */
 } CCX_GlobalStats_t;
 
 typedef enum
@@ -461,6 +463,14 @@ struct CCX_instance_t
 
 CCX_Status_t CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg);
 CCX_Status_t CCX_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg);
+uint16_t CCX_RX_GetDepth(const CCX_instance_t *Instance);
+uint16_t CCX_TX_GetDepth(const CCX_instance_t *Instance);
+uint16_t CCX_RX_GetFree(const CCX_instance_t *Instance);
+uint16_t CCX_TX_GetFree(const CCX_instance_t *Instance);
+void CCX_FlushRx(CCX_instance_t *Instance);
+void CCX_FlushTx(CCX_instance_t *Instance);
+void CCX_Flush(CCX_instance_t *Instance);
+void CCX_Reset(CCX_instance_t *Instance);
 CCX_Status_t CCX_Poll(CCX_instance_t *Instance);
 CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CCX_TX_table_t *CCX_TX_table,
                       uint16_t RxTableSize, uint16_t TxTableSize,

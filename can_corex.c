@@ -113,6 +113,46 @@ static inline void CopyBuf(const uint8_t *restrict src, uint8_t *restrict dst, s
     }
 }
 
+static uint16_t CCX_GetRingDepth(uint16_t head, uint16_t tail, uint16_t size)
+{
+    if (head >= tail)
+    {
+        return (uint16_t)(head - tail);
+    }
+
+    return (uint16_t)(size - tail + head);
+}
+
+static inline void CCX_UpdatePeakDepth(uint16_t depth, uint16_t *peak)
+{
+    if (depth > *peak)
+    {
+        *peak = depth;
+    }
+}
+
+static inline void CCX_UpdateRxPeakDepth(CCX_instance_t *Instance)
+{
+    if (Instance == NULL)
+    {
+        return;
+    }
+
+    CCX_UpdatePeakDepth(CCX_GetRingDepth(Instance->RxHead, Instance->RxTail, CCX_RX_BUFFER_SIZE),
+                        &Instance->GlobalStats.peak_rx_depth);
+}
+
+static inline void CCX_UpdateTxPeakDepth(CCX_instance_t *Instance)
+{
+    if (Instance == NULL)
+    {
+        return;
+    }
+
+    CCX_UpdatePeakDepth(CCX_GetRingDepth(Instance->TxHead, Instance->TxTail, CCX_TX_BUFFER_SIZE),
+                        &Instance->GlobalStats.peak_tx_depth);
+}
+
 CCX_Status_t CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
 {
     if (NULL == Instance || NULL == msg)
@@ -148,6 +188,7 @@ CCX_Status_t CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
     memcpy(&Instance->RxBuf[next_head], msg, sizeof(CCX_message_t));
     Instance->RxReceivedTick[next_head] = CCX_GetPrimaryTick();
     Instance->RxHead = next_head;
+    CCX_UpdateRxPeakDepth(Instance);
 
     Instance->GlobalStats.total_rx_messages++; /* Increment RX counter (v1.3.0) */
 
@@ -410,10 +451,99 @@ CCX_Status_t CCX_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
     /* Publish the new head only after the slot is fully written. */
     memcpy(&Instance->TxBuf[next_head], msg, sizeof(CCX_message_t));
     Instance->TxHead = next_head;
+    CCX_UpdateTxPeakDepth(Instance);
 
     CCX_net_push(Instance, &Instance->TxBuf[next_head], 1);
 
     return CCX_OK;
+}
+
+uint16_t CCX_RX_GetDepth(const CCX_instance_t *Instance)
+{
+    if (Instance == NULL)
+    {
+        return 0U;
+    }
+
+    return CCX_GetRingDepth(Instance->RxHead, Instance->RxTail, CCX_RX_BUFFER_SIZE);
+}
+
+uint16_t CCX_TX_GetDepth(const CCX_instance_t *Instance)
+{
+    if (Instance == NULL)
+    {
+        return 0U;
+    }
+
+    return CCX_GetRingDepth(Instance->TxHead, Instance->TxTail, CCX_TX_BUFFER_SIZE);
+}
+
+uint16_t CCX_RX_GetFree(const CCX_instance_t *Instance)
+{
+    if (Instance == NULL)
+    {
+        return 0U;
+    }
+
+    return (uint16_t)((CCX_RX_BUFFER_SIZE - 1U) - CCX_RX_GetDepth(Instance));
+}
+
+uint16_t CCX_TX_GetFree(const CCX_instance_t *Instance)
+{
+    if (Instance == NULL)
+    {
+        return 0U;
+    }
+
+    return (uint16_t)((CCX_TX_BUFFER_SIZE - 1U) - CCX_TX_GetDepth(Instance));
+}
+
+void CCX_FlushRx(CCX_instance_t *Instance)
+{
+    if (Instance == NULL)
+    {
+        return;
+    }
+
+    Instance->RxHead = 0U;
+    Instance->RxTail = 0U;
+    for (uint16_t i = 0; i < CCX_RX_BUFFER_SIZE; i++)
+    {
+        Instance->RxReceivedTick[i] = 0U;
+    }
+}
+
+void CCX_FlushTx(CCX_instance_t *Instance)
+{
+    if (Instance == NULL)
+    {
+        return;
+    }
+
+    Instance->TxHead = 0U;
+    Instance->TxTail = 0U;
+}
+
+void CCX_Flush(CCX_instance_t *Instance)
+{
+    if (Instance == NULL)
+    {
+        return;
+    }
+
+    CCX_FlushRx(Instance);
+    CCX_FlushTx(Instance);
+}
+
+void CCX_Reset(CCX_instance_t *Instance)
+{
+    if (Instance == NULL)
+    {
+        return;
+    }
+
+    CCX_Flush(Instance);
+    CCX_ResetGlobalStats(Instance);
 }
 
 static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)

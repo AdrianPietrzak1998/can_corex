@@ -1,6 +1,6 @@
 # CAN CoreX Implementation Guide
 
-**Version:** 2.2.1  
+**Version:** 2.2.2  
 **Author:** Adrian Pietrzak  
 **Date:** April 2026
 
@@ -51,8 +51,11 @@ project/
     └── can_corex_isotp.h
 ```
 
-In `2.2.1`, the CAN CoreX library also includes the public bus-monitoring module files
+In `2.2.1` and newer, the CAN CoreX library also includes the public bus-monitoring module files
 `can_corex_bus.c` and `can_corex_bus.h`.
+
+In `2.2.2`, the core module also exposes queue depth/free helpers, queue flush/reset helpers,
+and peak RX/TX queue depth counters in `CCX_GlobalStats_t`.
 
 Header organization:
 
@@ -1281,6 +1284,8 @@ void CAN_App_PrintStats(void)
     printf("TX messages:      %lu\n", stats1->total_tx_messages);
     printf("RX overflows:     %lu\n", stats1->rx_buffer_overflows);
     printf("TX overflows:     %lu\n", stats1->tx_buffer_overflows);
+    printf("Peak RX depth:    %u\n", stats1->peak_rx_depth);
+    printf("Peak TX depth:    %u\n", stats1->peak_tx_depth);
     printf("Parser calls:     %lu\n", stats1->parser_calls_count);
     printf("Timeout calls:    %lu\n", stats1->timeout_calls_count);
     
@@ -1289,6 +1294,8 @@ void CAN_App_PrintStats(void)
     printf("TX messages:      %lu\n", stats2->total_tx_messages);
     printf("RX overflows:     %lu\n", stats2->rx_buffer_overflows);
     printf("TX overflows:     %lu\n", stats2->tx_buffer_overflows);
+    printf("Peak RX depth:    %u\n", stats2->peak_rx_depth);
+    printf("Peak TX depth:    %u\n", stats2->peak_tx_depth);
     
     /* Get bus monitoring statistics */
     CCX_BusState_t state1 = CCX_BusMonitor_GetState(&CAN1_instance);
@@ -1323,6 +1330,20 @@ void CAN_App_ResetStats(void)
     printf("Statistics reset for both CAN instances\n");
 }
 ```
+
+Queue occupancy can be queried directly when reporting diagnostics or deciding whether to
+throttle application traffic:
+
+```c
+uint16_t rx_depth = CCX_RX_GetDepth(&CAN1_instance);
+uint16_t tx_depth = CCX_TX_GetDepth(&CAN1_instance);
+uint16_t rx_free = CCX_RX_GetFree(&CAN1_instance);
+uint16_t tx_free = CCX_TX_GetFree(&CAN1_instance);
+```
+
+Use `CCX_FlushRx()`, `CCX_FlushTx()`, or `CCX_Flush()` to discard queued frames without
+resetting statistics. Use `CCX_Reset()` when both RX/TX queues and global statistics should
+be cleared together.
 
 #### Step 5: Call Statistics from Main Loop
 
