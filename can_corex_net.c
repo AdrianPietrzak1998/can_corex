@@ -46,6 +46,36 @@ CCX_net_status_t CCX_net_clear_nodes(CCX_net_t *net)
     return CCX_NET_OK;
 }
 
+static uint16_t CCX_net_GetRingDepth(uint16_t head, uint16_t tail, uint16_t size)
+{
+    if (head >= tail)
+    {
+        return (uint16_t)(head - tail);
+    }
+
+    return (uint16_t)(size - tail + head);
+}
+
+static void CCX_net_UpdateRxPeakDepth(CCX_instance_t *Instance)
+{
+    uint16_t depth = CCX_net_GetRingDepth(Instance->RxHead, Instance->RxTail, CCX_RX_BUFFER_SIZE);
+
+    if (depth > Instance->GlobalStats.peak_rx_depth)
+    {
+        Instance->GlobalStats.peak_rx_depth = depth;
+    }
+}
+
+static void CCX_net_UpdateTxPeakDepth(CCX_instance_t *Instance)
+{
+    uint16_t depth = CCX_net_GetRingDepth(Instance->TxHead, Instance->TxTail, CCX_TX_BUFFER_SIZE);
+
+    if (depth > Instance->GlobalStats.peak_tx_depth)
+    {
+        Instance->GlobalStats.peak_tx_depth = depth;
+    }
+}
+
 /**
  * @brief Internal helper - Push message to TX buffer of a CAN instance
  *
@@ -55,7 +85,7 @@ CCX_net_status_t CCX_net_clear_nodes(CCX_net_t *net)
  * @param Instance CAN instance to push to
  * @param msg Message to push
  */
-static void CCX_net_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
+static CCX_Status_t CCX_net_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
 {
     assert(Instance != NULL);
     assert(msg != NULL);
@@ -68,12 +98,16 @@ static void CCX_net_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *ms
 
     if (next_head == Instance->TxTail)
     {
-        return;
+        Instance->GlobalStats.tx_buffer_overflows++;
+        return CCX_BUS_TOO_BUSY;
     }
 
     Instance->TxHead = next_head;
 
     memcpy(&Instance->TxBuf[Instance->TxHead], msg, sizeof(CCX_message_t));
+    CCX_net_UpdateTxPeakDepth(Instance);
+
+    return CCX_OK;
 }
 
 /**
@@ -85,9 +119,10 @@ static void CCX_net_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *ms
  * @param Instance CAN instance to push to
  * @param msg Message to push
  */
-static void CCX_net_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
+static CCX_Status_t CCX_net_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
 {
     assert(Instance != NULL);
+    assert(msg != NULL);
 
     uint16_t next_head = Instance->RxHead + 1;
     if (next_head >= CCX_RX_BUFFER_SIZE)
@@ -97,13 +132,17 @@ static void CCX_net_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *ms
 
     if (next_head == Instance->RxTail)
     {
-        return;
+        Instance->GlobalStats.rx_buffer_overflows++;
+        return CCX_BUS_TOO_BUSY;
     }
 
     Instance->RxHead = next_head;
 
     memcpy(&Instance->RxBuf[Instance->RxHead], msg, sizeof(CCX_message_t));
     Instance->RxReceivedTick[Instance->RxHead] = CCX_GET_TICK;
+    CCX_net_UpdateRxPeakDepth(Instance);
+
+    return CCX_OK;
 }
 
 CCX_net_status_t CCX_net_init(CCX_net_t *net)

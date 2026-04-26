@@ -1,10 +1,10 @@
 ﻿# CAN CoreX
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-2.2.1-blue.svg)](#changelog)
+[![Version](https://img.shields.io/badge/Version-2.2.2-blue.svg)](#changelog)
 [![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-352%20classic%20%7C%20529%20FD%20passing-success.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-622%20passing-success.svg)]()
 [![ISO-TP validated with PEAK PCAN-ISO-TP API](https://img.shields.io/badge/ISO--TP-validated%20with%20PEAK%20PCAN--ISO--TP%20API-informational.svg)](#iso-tp)
 [![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
@@ -22,7 +22,7 @@ The main value of the library is:
 - ISO-TP support for both classic CAN and CAN FD
 - optional bus monitoring and runtime statistics
 
-Version `2.2.1` keeps the `2.2.0` timing cleanup and additionally splits bus monitoring into its own public module header, `can_corex_bus.h`.
+Version `2.2.2` keeps the `2.2.x` public API compatible and adds queue observability, queue flush/reset helpers, peak RX/TX queue usage statistics, stronger network replication overflow accounting, and safer ISO-TP TX enqueue error handling.
 
 ## Table of Contents
 
@@ -150,7 +150,7 @@ In `2.2.0`, timing in this area is also more explicit:
 - `successful_run_time` uses the primary timebase
 - `recovery_delay` can use HR only for short delays via `CCX_BUS_RECOVERY_US(...)`
 
-Header organization in `2.2.1`:
+Header organization in `2.2.1` and newer:
 
 - `can_corex.h` remains the main public header
 - `can_corex_bus.h` contains bus-monitoring types, macros, and API declarations
@@ -1251,6 +1251,8 @@ Always-on statistics tracking with minimal overhead. Automatically maintained by
 - `total_tx_messages` - Total messages successfully transmitted (requires `CCX_OnMessageTransmitted()` call from ISR)
 - `rx_buffer_overflows` - Number of times RX buffer was full
 - `tx_buffer_overflows` - Number of times TX buffer was full
+- `peak_rx_depth` - Highest observed RX queue depth since statistics reset
+- `peak_tx_depth` - Highest observed TX queue depth since statistics reset
 - `parser_calls_count` - Total parser function invocations
 - `timeout_calls_count` - Total timeout callback invocations
 
@@ -1263,6 +1265,9 @@ printf("RX: %lu, TX: %lu, Overflows: %lu/%lu\n",
        stats->total_tx_messages,
        stats->rx_buffer_overflows,
        stats->tx_buffer_overflows);
+printf("Peak queue depth: RX=%u, TX=%u\n",
+       stats->peak_rx_depth,
+       stats->peak_tx_depth);
 
 // Reset statistics
 CCX_ResetGlobalStats(&can_instance);
@@ -1278,6 +1283,30 @@ void CAN_TX_IRQHandler(void) {
     CCX_OnMessageTransmitted(&can_instance, NULL);
 }
 ```
+
+### Queue State Helpers
+
+The RX/TX queues can be inspected without touching queue internals:
+
+```c
+uint16_t rx_depth = CCX_RX_GetDepth(&can_instance);
+uint16_t tx_depth = CCX_TX_GetDepth(&can_instance);
+uint16_t rx_free = CCX_RX_GetFree(&can_instance);
+uint16_t tx_free = CCX_TX_GetFree(&can_instance);
+```
+
+All four helpers return `0` for `NULL`.
+
+Queue contents can also be cleared explicitly:
+
+```c
+CCX_FlushRx(&can_instance);  // clear only RX queue indices
+CCX_FlushTx(&can_instance);  // clear only TX queue indices
+CCX_Flush(&can_instance);    // clear RX and TX queues
+CCX_Reset(&can_instance);    // clear RX/TX queues and reset global stats
+```
+
+`CCX_Flush*()` does not reset global statistics or ISO-TP session state. `CCX_Reset()` resets global statistics, including `peak_rx_depth` and `peak_tx_depth`.
 
 ### Bus Monitoring
 
@@ -1609,7 +1638,24 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v2.2.1 (2026-04-24)
+### Current Release: v2.2.2 (2026-04-26)
+- **Queue observability**:
+  - added `CCX_RX_GetDepth()`, `CCX_TX_GetDepth()`, `CCX_RX_GetFree()`, and `CCX_TX_GetFree()`
+  - added `peak_rx_depth` and `peak_tx_depth` to global statistics
+- **Queue control**:
+  - added `CCX_FlushRx()`, `CCX_FlushTx()`, `CCX_Flush()`, and `CCX_Reset()`
+  - flush helpers clear queue indices without resetting statistics
+  - `CCX_Reset()` clears RX/TX queues and global statistics
+- **Network replication accounting**:
+  - failed internal replication pushes now increment existing RX/TX overflow counters
+  - successful internal replication updates target queue peak usage
+- **ISO-TP robustness**:
+  - TX enqueue failures for SF, FF, and CF now abort transmission, return/report failure, and raise `CCX_ISOTP_ERROR_BUSY`
+  - RX initialization accepts `STmin` values `0xF1..0xF9` and advertises the raw value in Flow Control frames
+  - TX behavior for sub-millisecond `STmin` in single-timebase builds remains rounded up to the nearest full millisecond
+- **Breaking Changes**: None to existing function signatures, enum values, or initialization APIs
+
+### Previous Release: v2.2.1 (2026-04-24)
 - **Bus-monitoring header split**:
   - bus-monitoring public types, macros, and API declarations moved from `can_corex.h` to `can_corex_bus.h`
   - `can_corex.h` still includes `can_corex_bus.h`, so existing integrations that include only `can_corex.h` remain valid

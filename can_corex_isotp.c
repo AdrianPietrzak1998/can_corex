@@ -315,11 +315,12 @@ static inline void ISOTP_SetSTminRuntime(CCX_ISOTP_TX_t *Instance, uint8_t stmin
     Instance->STminHighResTicks = 0U;
 }
 
-static inline void ISOTP_SendCANMessage(CCX_instance_t *CanInstance, uint32_t ID, uint8_t IDE_flag, const uint8_t *Data,
-                                        uint8_t used_len, uint8_t target_can_dl, const CCX_ISOTP_Padding_t *Padding
+static inline CCX_Status_t ISOTP_SendCANMessage(CCX_instance_t *CanInstance, uint32_t ID, uint8_t IDE_flag,
+                                                const uint8_t *Data, uint8_t used_len, uint8_t target_can_dl,
+                                                const CCX_ISOTP_Padding_t *Padding
 #if CCX_ENABLE_CANFD
-                                        ,
-                                        uint8_t frame_format
+                                                ,
+                                                uint8_t frame_format
 #endif
 )
 {
@@ -350,7 +351,7 @@ static inline void ISOTP_SendCANMessage(CCX_instance_t *CanInstance, uint32_t ID
         }
     }
 
-    CCX_TX_PushMsg(CanInstance, &msg);
+    return CCX_TX_PushMsg(CanInstance, &msg);
 }
 
 static inline uint8_t ISOTP_IsExtendedSingleFrame(uint8_t frame_format, uint8_t can_dl, CCX_ISOTP_Length_t length)
@@ -412,6 +413,20 @@ static inline void ISOTP_ResetTXTransfer(CCX_ISOTP_TX_t *Instance)
     Instance->WaitFramesRemaining = Instance->MaxWaitFrames;
     Instance->ActiveTxDL = ISOTP_CLASSIC_CAN_DL;
     Instance->LengthFormat = CCX_ISOTP_LENGTH_FORMAT_STANDARD;
+}
+
+static inline CCX_ISOTP_Status_t ISOTP_AbortTXOnCANQueueError(CCX_ISOTP_TX_t *Instance, CCX_Status_t CanStatus)
+{
+    (void)CanStatus;
+
+    Instance->State = CCX_ISOTP_TX_STATE_IDLE;
+    ISOTP_ResetTXTransfer(Instance);
+    if (Instance->Config.OnError != NULL)
+    {
+        Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_BUSY, Instance->Config.UserData);
+    }
+
+    return CCX_ISOTP_ERROR_BUSY;
 }
 
 static inline void ISOTP_ResetRXTransfer(CCX_ISOTP_RX_t *Instance)
@@ -636,13 +651,18 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
             return CCX_ISOTP_ERROR_INVALID_ARG;
         }
 
-        ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
-                             used_len, target_can_dl, &Instance->Config.Padding
+        CCX_Status_t can_status =
+            ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
+                                 used_len, target_can_dl, &Instance->Config.Padding
 #if CCX_ENABLE_CANFD
-                             ,
-                             frame_format
+                                 ,
+                                 frame_format
 #endif
-        );
+            );
+        if (can_status != CCX_OK)
+        {
+            return ISOTP_AbortTXOnCANQueueError(Instance, can_status);
+        }
 
         Instance->State = CCX_ISOTP_TX_STATE_IDLE;
         ISOTP_ResetTXTransfer(Instance);
@@ -684,13 +704,18 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
     memcpy(&frame[ISOTP_GetFirstFrameHeaderSize(Instance->LengthFormat)], Data, (size_t)first_frame_data_capacity);
     used_len = (uint8_t)(ISOTP_GetFirstFrameHeaderSize(Instance->LengthFormat) + first_frame_data_capacity);
 
-    ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
-                         used_len, tx_dl, &Instance->Config.Padding
+    CCX_Status_t can_status =
+        ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
+                             used_len, tx_dl, &Instance->Config.Padding
 #if CCX_ENABLE_CANFD
-                         ,
-                         frame_format
+                             ,
+                             frame_format
 #endif
-    );
+        );
+    if (can_status != CCX_OK)
+    {
+        return ISOTP_AbortTXOnCANQueueError(Instance, can_status);
+    }
 
     Instance->TxDataOffset = first_frame_data_capacity;
     Instance->SequenceNumber = 1U;
@@ -820,13 +845,19 @@ static inline void CCX_ISOTP_TX_SendConsecutiveFrame(CCX_ISOTP_TX_t *Instance)
         return;
     }
 
-    ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
-                         used_len, target_can_dl, &Instance->Config.Padding
+    CCX_Status_t can_status =
+        ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
+                             used_len, target_can_dl, &Instance->Config.Padding
 #if CCX_ENABLE_CANFD
-                         ,
-                         frame_format
+                             ,
+                             frame_format
 #endif
-    );
+        );
+    if (can_status != CCX_OK)
+    {
+        (void)ISOTP_AbortTXOnCANQueueError(Instance, can_status);
+        return;
+    }
 
     Instance->TxDataOffset += data_len;
     Instance->SequenceNumber = (uint8_t)((Instance->SequenceNumber + 1U) & ISOTP_SN_MASK);
@@ -1013,13 +1044,6 @@ CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, CCX_instance_t *C
         return CCX_ISOTP_ERROR_BUSY;
     }
 
-#ifdef CCX_DISABLE_HIGH_RES_TIMEBASE
-    if (ISOTP_STminUsesHighRes(Config->STmin))
-    {
-        return CCX_ISOTP_ERROR_INVALID_ARG;
-    }
-#endif
-
 #if CCX_ENABLE_CANFD
     uint8_t active_tx_dl = ISOTP_GetConfiguredTxDL(Config->FrameFormat, Config->FC_TxDL);
     if (!ISOTP_IsValidTxDL(active_tx_dl))
@@ -1092,11 +1116,11 @@ static inline void CCX_ISOTP_RX_SendFlowControl(CCX_ISOTP_RX_t *Instance, CCX_IS
         return;
     }
 
-    ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
-                         ISOTP_FC_FRAME_DATA_SIZE, target_can_dl, &Instance->Config.Padding
+    (void)ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
+                               ISOTP_FC_FRAME_DATA_SIZE, target_can_dl, &Instance->Config.Padding
 #if CCX_ENABLE_CANFD
-                         ,
-                         frame_format
+                               ,
+                               frame_format
 #endif
     );
 }
