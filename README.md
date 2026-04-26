@@ -1653,6 +1653,8 @@ Mozilla Public License 2.0 - see LICENSE file for details.
   - TX enqueue failures for SF, FF, and CF now abort transmission, return/report failure, and raise `CCX_ISOTP_ERROR_BUSY`
   - RX initialization accepts `STmin` values `0xF1..0xF9` and advertises the raw value in Flow Control frames
   - TX behavior for sub-millisecond `STmin` in single-timebase builds remains rounded up to the nearest full millisecond
+- **C++ compatibility**:
+  - public headers now use `extern "C"` guards when included from C++
 - **Breaking Changes**: None to existing function signatures, enum values, or initialization APIs
 
 ### Previous Release: v2.2.1 (2026-04-24)

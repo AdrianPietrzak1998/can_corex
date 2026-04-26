@@ -15,6 +15,10 @@
 #error "Include can_corex.h instead of can_corex_bus.h directly."
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct
 {
     CCX_HR_TIME_t HighResDelay;
@@ -185,4 +189,8 @@ CCX_Status_t CCX_BusMonitor_TriggerRecovery(CCX_instance_t *Instance);
 CCX_BusState_t CCX_BusMonitor_GetState(const CCX_instance_t *Instance);
 void CCX_BusMonitor_ResetStats(CCX_instance_t *Instance);
 
+#ifdef __cplusplus
+}
 #endif
+
+#endif /* CAN_COREX_CAN_COREX_BUS_H_ */

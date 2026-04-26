@@ -13,6 +13,10 @@
 
 #include "can_corex.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @def CCX_ISOTP_MAX_CLASSIC_DATA_SIZE
  * @brief Maximum ISO-TP payload for classic CAN instances
@@ -660,6 +664,10 @@ void CCX_ISOTP_RX_Poll(CCX_ISOTP_RX_t *Instance);
         .ID = (fc_can_id), .DLC = CCX_DLC_ANY, .IDE_flag = (ide_flag), .UserData = (isotp_tx_ptr), .TimeOut = 0,       \
         .Parser = CCX_ISOTP_TX_FC_Parser, .TimeoutCallback = NULL, .LastTick = 0                                       \
     }
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif /* CAN_COREX_CAN_COREX_ISOTP_H_ */

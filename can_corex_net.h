@@ -13,6 +13,10 @@
 
 #include "can_corex.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @def CCX_MAX_INSTANCE_IN_NETWORK
  * @brief Maximum number of CAN instances that can be connected to a single network
@@ -167,5 +171,9 @@ CCX_net_status_t CCX_net_deinit(CCX_net_t *net);
  * @note This does NOT remove the network from the global list (use CCX_net_deinit for that)
  */
 CCX_net_status_t CCX_net_clear_nodes(CCX_net_t *net);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* CAN_COREX_CAN_COREX_NET_H_ */

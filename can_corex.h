@@ -14,6 +14,10 @@
 #include <limits.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @def CCX_TICK_FROM_FUNC
  * @brief Enables system tick retrieval via a function call.
@@ -663,5 +667,9 @@ static inline uint8_t CCX_MsgPayloadLen(const CCX_message_t *msg)
 }
 
 #endif /* CCX_ENABLE_CANFD */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* CAN_COREX_CAN_COREX_H_ */
