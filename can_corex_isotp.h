@@ -18,6 +18,15 @@ extern "C" {
 #endif
 
 /**
+ * @file can_corex_isotp.h
+ * @brief ISO-TP transport layer public API.
+ *
+ * @defgroup ccx_isotp ISO-TP
+ * @brief ISO 15765-2 transport over classic CAN and CAN FD.
+ * @{
+ */
+
+/**
  * @def CCX_ISOTP_MAX_CLASSIC_DATA_SIZE
  * @brief Maximum ISO-TP payload for classic CAN instances
  *
@@ -463,6 +472,7 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance);
  * @param CanInstance CAN CoreX instance (unused, for compatibility)
  * @param Msg Received CAN message (Flow Control)
  * @param Slot RX table slot (unused, for compatibility)
+ * @param UserData ISO-TP TX instance pointer from the RX table entry
  */
 void CCX_ISOTP_TX_FC_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Msg, uint16_t Slot, void *UserData);
 
@@ -574,6 +584,7 @@ CCX_ISOTP_Status_t CCX_ISOTP_RX_Abort(CCX_ISOTP_RX_t *Instance);
  * @param CanInstance CAN CoreX instance (unused, for compatibility)
  * @param Msg Received CAN message
  * @param Slot RX table slot (unused, for compatibility)
+ * @param UserData ISO-TP RX instance pointer from the RX table entry
  */
 void CCX_ISOTP_RX_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Msg, uint16_t Slot, void *UserData);
 
@@ -665,6 +676,8 @@ void CCX_ISOTP_RX_Poll(CCX_ISOTP_RX_t *Instance);
         .Parser = CCX_ISOTP_TX_FC_Parser, .TimeoutCallback = NULL, .LastTick = 0                                       \
     }
 #endif
+
+/** @} */
 
 #ifdef __cplusplus
 }

@@ -1,13 +1,13 @@
 ﻿# CAN CoreX
 
-[![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Version](https://img.shields.io/badge/Version-2.2.2-blue.svg)](#changelog)
-[![Language: C](https://img.shields.io/badge/Language-C-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
-[![Platform: Embedded](https://img.shields.io/badge/Platform-Embedded-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-622%20passing-success.svg)]()
-[![ISO-TP validated with PEAK PCAN-ISO-TP API](https://img.shields.io/badge/ISO--TP-validated%20with%20PEAK%20PCAN--ISO--TP%20API-informational.svg)](#iso-tp)
-[![GitHub stars](https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social)](https://github.com/AdrianPietrzak1998/can_corex/network/members)
+<a href="https://opensource.org/licenses/MPL-2.0"><img alt="License: MPL 2.0" src="https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg"></a>
+<a href="#changelog"><img alt="Version 2.2.2" src="https://img.shields.io/badge/Version-2.2.2-blue.svg"></a>
+<a href="https://en.wikipedia.org/wiki/C_(programming_language)"><img alt="Language: C" src="https://img.shields.io/badge/Language-C-blue.svg"></a>
+<img alt="Platform: Embedded" src="https://img.shields.io/badge/Platform-Embedded-orange.svg">
+<img alt="Tests: 622 passing" src="https://img.shields.io/badge/Tests-622%20passing-success.svg">
+<a href="#iso-tp"><img alt="ISO-TP validated with PEAK PCAN-ISO-TP API" src="https://img.shields.io/badge/ISO--TP-validated%20with%20PEAK%20PCAN--ISO--TP%20API-informational.svg"></a>
+<a href="https://github.com/AdrianPietrzak1998/can_corex/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social"></a>
+<a href="https://github.com/AdrianPietrzak1998/can_corex/network/members"><img alt="GitHub forks" src="https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social"></a>
 
 
 ## Overview
@@ -36,7 +36,8 @@ Version `2.2.2` keeps the `2.2.x` public API compatible and adds queue observabi
 8. [Usage Examples](#usage-examples)
 9. [Advanced Build-Time Options](#advanced-build-time-options)
 10. [Best Practices](#best-practices)
-11. [Changelog](#changelog)
+11. [Doxygen API Reference](#doxygen-api-reference)
+12. [Changelog](#changelog)
 
 ---
 
@@ -185,6 +186,30 @@ while (1) {
     CCX_ISOTP_RX_Poll(&isotp_rx);
 }
 ```
+
+---
+
+## Doxygen API Reference
+
+The public headers are documented with Doxygen comments and can be rendered as
+an API reference. README remains the narrative guide; generated Doxygen output
+is intended as a symbol-level reference.
+
+To generate local HTML documentation from the `can_corex/` directory:
+
+```bash
+doxygen Doxyfile
+```
+
+From the test harness repository, documentation can also be generated after a
+fully passing test matrix:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_and_run_all_tests.ps1 -Docs
+```
+
+Open `docs/html/index.html` after generation. Generated documentation output is
+ignored by git.
 
 ---
 
@@ -1583,6 +1608,16 @@ rx_table[0].TimeoutCallback = critical_sensor_timeout_handler;
 
 CAN CoreX is **not thread-safe** by default. If using RTOS:
 
+RX/TX queue indices are declared `volatile` so the common bare-metal pattern
+where an ISR pushes RX frames and the main loop calls `CCX_Poll()` has proper
+compiler visibility for queue state. This does not make compound operations
+atomic and does not support multiple concurrent producers or consumers.
+
+Global statistics are best-effort counters, not atomic counters. If statistics
+are read or reset from a different context than the one updating them, protect
+that access with the same critical section, interrupt masking, or mutex used for
+the CAN instance.
+
 ### Option 1: Single Thread Access
 ```c
 void can_task(void *param) {
@@ -1655,6 +1690,8 @@ Mozilla Public License 2.0 - see LICENSE file for details.
   - TX behavior for sub-millisecond `STmin` in single-timebase builds remains rounded up to the nearest full millisecond
 - **C++ compatibility**:
   - public headers now use `extern "C"` guards when included from C++
+- **Documentation**:
+  - added local Doxygen configuration and public API module groups
 - **Breaking Changes**: None to existing function signatures, enum values, or initialization APIs
 
 ### Previous Release: v2.2.1 (2026-04-24)

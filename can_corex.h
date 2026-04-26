@@ -19,6 +19,15 @@ extern "C" {
 #endif
 
 /**
+ * @file can_corex.h
+ * @brief Core CAN CoreX public API.
+ *
+ * @defgroup ccx_core Core CAN
+ * @brief Table-driven CAN RX/TX, queue management, timebase, statistics, and CAN FD helpers.
+ * @{
+ */
+
+/**
  * @def CCX_TICK_FROM_FUNC
  * @brief Enables system tick retrieval via a function call.
  *
@@ -67,7 +76,9 @@ extern "C" {
  * When 0 (default): zero RAM/code overhead, ABI identical to v1.x.
  * When 1: CCX_message_t grows to 64-byte payload; CCX_frame_format_t and CCX_ide_t enums available.
  */
-#ifndef CCX_ENABLE_CANFD
+#if defined(DOXYGEN)
+#define CCX_ENABLE_CANFD 1
+#elif !defined(CCX_ENABLE_CANFD)
 #define CCX_ENABLE_CANFD 0
 #endif
 
@@ -445,7 +456,7 @@ struct CCX_instance_t
 
     CCX_message_t RxBuf[CCX_RX_BUFFER_SIZE];
     CCX_message_t TxBuf[CCX_TX_BUFFER_SIZE];
-    uint16_t RxTail, RxHead, TxTail, TxHead;
+    volatile uint16_t RxTail, RxHead, TxTail, TxHead;
     CCX_TIME_t RxReceivedTick[CCX_RX_BUFFER_SIZE];
 
     CCX_RX_table_t *CCX_RX_table;
@@ -667,6 +678,8 @@ static inline uint8_t CCX_MsgPayloadLen(const CCX_message_t *msg)
 }
 
 #endif /* CCX_ENABLE_CANFD */
+
+/** @} */
 
 #ifdef __cplusplus
 }

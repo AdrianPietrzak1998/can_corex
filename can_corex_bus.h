@@ -11,13 +11,22 @@
 #ifndef CAN_COREX_CAN_COREX_BUS_H_
 #define CAN_COREX_CAN_COREX_BUS_H_
 
-#ifndef CAN_COREX_CAN_COREX_H_
+#if !defined(CAN_COREX_CAN_COREX_H_) && !defined(DOXYGEN)
 #error "Include can_corex.h instead of can_corex_bus.h directly."
 #endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * @file can_corex_bus.h
+ * @brief Bus monitoring public API.
+ *
+ * @defgroup ccx_bus Bus Monitoring
+ * @brief CAN bus state tracking, bus-off recovery, and bus health statistics.
+ * @{
+ */
 
 typedef struct
 {
@@ -188,6 +197,8 @@ CCX_Status_t CCX_BusMonitor_Init(CCX_instance_t *Instance, CCX_BusMonitor_t *Mon
 CCX_Status_t CCX_BusMonitor_TriggerRecovery(CCX_instance_t *Instance);
 CCX_BusState_t CCX_BusMonitor_GetState(const CCX_instance_t *Instance);
 void CCX_BusMonitor_ResetStats(CCX_instance_t *Instance);
+
+/** @} */
 
 #ifdef __cplusplus
 }
