@@ -14,6 +14,9 @@
 
 CAN CoreX is built around one practical idea: most CAN applications end up maintaining the same RX parsers, TX messages, timeouts, and periodic traffic by hand. This library moves that work into explicit RX/TX tables and a small polling model.
 
+Hosted documentation is available as the
+[CAN CoreX Doxygen API Reference](https://adrianpietrzak1998.github.io/can_corex/docs/html/index.html).
+
 The main value of the library is:
 
 - table-driven RX handling with parser callbacks
@@ -189,29 +192,6 @@ while (1) {
 
 ---
 
-## Doxygen API Reference
-
-The public headers are documented with Doxygen comments and can be rendered as
-an API reference. README remains the narrative guide; generated Doxygen output
-is intended as a symbol-level reference.
-
-To generate local HTML documentation from the `can_corex/` directory:
-
-```bash
-doxygen Doxyfile
-```
-
-From the test harness repository, documentation can also be generated after a
-fully passing test matrix:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\build_and_run_all_tests.ps1 -Docs
-```
-
-Open `docs/html/index.html` after generation. Generated documentation output is
-ignored by git.
-
----
 
 ## API Reference
 

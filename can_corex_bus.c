@@ -8,8 +8,8 @@
  * Created: Apr 24, 2026
  */
 
-#include "can_corex.h"
 #include "assert.h"
+#include "can_corex.h"
 #include "string.h"
 
 void CCX_BusMonitor_Update(CCX_instance_t *Instance)

@@ -250,7 +250,7 @@ static inline CCX_MsgRegStatus_t CCX_RX_ProcessMatch(CCX_instance_t *Instance, C
 #if CCX_ENABLE_CANFD
     /* FD and FD_BRS both count as "FD" for format matching — entry FD matches any FD frame */
     uint8_t entry_is_fd = (Instance->CCX_RX_table[index].FrameFormat != CCX_FRAME_FORMAT_CLASSIC);
-    uint8_t msg_is_fd   = (Msg->FrameFormat != CCX_FRAME_FORMAT_CLASSIC);
+    uint8_t msg_is_fd = (Msg->FrameFormat != CCX_FRAME_FORMAT_CLASSIC);
     uint8_t format_match = (entry_is_fd == msg_is_fd);
 
     if (Instance->CCX_RX_table[index].DLC == CCX_DLC_ANY)
@@ -381,8 +381,7 @@ static inline void CCX_Timeout_Check(CCX_instance_t *Instance)
         for (uint16_t i = 0; i < Instance->RxTableSize; i++)
         {
             CCX_TIME_t elapsed = (CCX_TIME_t)(CCX_GetPrimaryTick() - Instance->CCX_RX_table[i].LastTick);
-            if ((0 != Instance->CCX_RX_table[i].TimeOut) &&
-                (elapsed >= Instance->CCX_RX_table[i].TimeOut))
+            if ((0 != Instance->CCX_RX_table[i].TimeOut) && (elapsed >= Instance->CCX_RX_table[i].TimeOut))
             {
                 Instance->CCX_RX_table[i].LastTick = CCX_GetPrimaryTick();
                 if (NULL != Instance->CCX_RX_table[i].TimeoutCallback)
@@ -566,9 +565,8 @@ static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
 
 #if CCX_ENABLE_CANFD
             CCX_frame_format_t table_fmt = Instance->CCX_TX_table[i].FrameFormat;
-            uint8_t len = (table_fmt != CCX_FRAME_FORMAT_CLASSIC)
-                              ? CCX_FD_DLC_TO_LEN[Instance->CCX_TX_table[i].DLC]
-                              : Instance->CCX_TX_table[i].DLC;
+            uint8_t len = (table_fmt != CCX_FRAME_FORMAT_CLASSIC) ? CCX_FD_DLC_TO_LEN[Instance->CCX_TX_table[i].DLC]
+                                                                  : Instance->CCX_TX_table[i].DLC;
 #else
             uint8_t len = Instance->CCX_TX_table[i].DLC;
 #endif
@@ -751,4 +749,3 @@ void CCX_RX_RebuildHash(CCX_instance_t *Instance)
     (void)Instance; /* Suppress unused parameter warning */
 #endif
 }
-
