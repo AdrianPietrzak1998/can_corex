@@ -1,6 +1,6 @@
 PROJECT_NAME           = "CAN CoreX"
 PROJECT_BRIEF          = "Table-driven CAN, CAN FD, ISO-TP, network simulation, and bus monitoring library"
-PROJECT_NUMBER         = 2.2.2
+PROJECT_NUMBER         = 2.3.0
 
 OUTPUT_DIRECTORY       = docs
 CREATE_SUBDIRS         = NO
@@ -9,7 +9,8 @@ INPUT                  = README.md \
                          can_corex.h \
                          can_corex_isotp.h \
                          can_corex_net.h \
-                         can_corex_bus.h
+                         can_corex_bus.h \
+                         can_corex_utils.h
 USE_MDFILE_AS_MAINPAGE = README.md
 FILE_PATTERNS          = *.h *.md
 RECURSIVE              = NO
