@@ -98,6 +98,7 @@ typedef uint16_t CCX_ISOTP_Length_t;
         CCX_ISOTP_LENGTH_FORMAT_EXTENDED
     } CCX_ISOTP_LengthFormat_t;
 
+#if CCX_ENABLE_CANFD
     typedef enum
     {
         CCX_ISOTP_TX_DL_8 = 8,
@@ -109,6 +110,7 @@ typedef uint16_t CCX_ISOTP_Length_t;
         CCX_ISOTP_TX_DL_48 = 48,
         CCX_ISOTP_TX_DL_64 = 64
     } CCX_ISOTP_TxDL_t;
+#endif
 
     /**
      * @brief Legal CAN FD link-layer payload sizes for ISO-TP sessions

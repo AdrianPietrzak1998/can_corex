@@ -856,9 +856,9 @@ void CAN_App_Init(void)
     filter2.SlaveStartFilterBank = 14;
     HAL_CAN_ConfigFilter(&hcan2, &filter2);
     
-    /* Activate RX notifications */
-    HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
-    HAL_CAN_ActivateNotification(&hcan2, CAN_IT_RX_FIFO1_MSG_PENDING);
+    /* Activate both RX FIFO notifications on both CAN peripherals */
+    HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_RX_FIFO1_MSG_PENDING);
+    HAL_CAN_ActivateNotification(&hcan2, CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_RX_FIFO1_MSG_PENDING);
     
     /* Start CAN peripherals */
     HAL_CAN_Start(&hcan1);
@@ -880,14 +880,25 @@ void CAN_App_Process(void)
  * HAL CAN RX Interrupt Callbacks
  * ======================================================================== */
 
-/* CAN1 FIFO0 reception callback */
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+static void CAN_App_HandleRxFifo(CAN_HandleTypeDef *hcan, uint32_t rx_fifo)
 {
+    CCX_instance_t *instance = NULL;
+
     if (hcan->Instance == CAN1) {
+        instance = &CAN1_instance;
+    } else if (hcan->Instance == CAN2) {
+        instance = &CAN2_instance;
+    }
+
+    if (instance == NULL) {
+        return;
+    }
+
+    while (HAL_CAN_GetRxFifoFillLevel(hcan, rx_fifo) > 0U) {
         CAN_RxHeaderTypeDef RxHeader;
         uint8_t RxData[8];
         
-        if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
+        if (HAL_CAN_GetRxMessage(hcan, rx_fifo, &RxHeader, RxData) == HAL_OK) {
             CCX_message_t msg;
             
             if (RxHeader.IDE == CAN_ID_EXT) {
@@ -903,37 +914,19 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
                 msg.Data[i] = RxData[i];
             }
             
-            CCX_RX_PushMsg(&CAN1_instance, &msg);
+            CCX_RX_PushMsg(instance, &msg);
         }
     }
 }
 
-/* CAN2 FIFO1 reception callback */
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+    CAN_App_HandleRxFifo(hcan, CAN_RX_FIFO0);
+}
+
 void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-    if (hcan->Instance == CAN2) {
-        CAN_RxHeaderTypeDef RxHeader;
-        uint8_t RxData[8];
-        
-        if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO1, &RxHeader, RxData) == HAL_OK) {
-            CCX_message_t msg;
-            
-            if (RxHeader.IDE == CAN_ID_EXT) {
-                msg.ID = RxHeader.ExtId;
-                msg.IDE_flag = 1;
-            } else {
-                msg.ID = RxHeader.StdId;
-                msg.IDE_flag = 0;
-            }
-            
-            msg.DLC = RxHeader.DLC;
-            for (uint8_t i = 0; i < RxHeader.DLC; i++) {
-                msg.Data[i] = RxData[i];
-            }
-            
-            CCX_RX_PushMsg(&CAN2_instance, &msg);
-        }
-    }
+    CAN_App_HandleRxFifo(hcan, CAN_RX_FIFO1);
 }
 
 /* ========================================================================
