@@ -1,10 +1,10 @@
 ﻿# CAN CoreX
 
 <a href="https://opensource.org/licenses/MPL-2.0"><img alt="License: MPL 2.0" src="https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg"></a>
-<a href="#changelog"><img alt="Version 2.2.2" src="https://img.shields.io/badge/Version-2.2.2-blue.svg"></a>
+<a href="#changelog"><img alt="Version 2.3.0" src="https://img.shields.io/badge/Version-2.3.0-blue.svg"></a>
 <a href="https://en.wikipedia.org/wiki/C_(programming_language)"><img alt="Language: C" src="https://img.shields.io/badge/Language-C-blue.svg"></a>
 <img alt="Platform: Embedded" src="https://img.shields.io/badge/Platform-Embedded-orange.svg">
-<img alt="Tests: 622 passing" src="https://img.shields.io/badge/Tests-622%20passing-success.svg">
+<img alt="Tests: 700 passing" src="https://img.shields.io/badge/Tests-700%20passing-success.svg">
 <a href="#iso-tp"><img alt="ISO-TP validated with PEAK PCAN-ISO-TP API" src="https://img.shields.io/badge/ISO--TP-validated%20with%20PEAK%20PCAN--ISO--TP%20API-informational.svg"></a>
 <a href="https://github.com/AdrianPietrzak1998/can_corex/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social"></a>
 <a href="https://github.com/AdrianPietrzak1998/can_corex/network/members"><img alt="GitHub forks" src="https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social"></a>
@@ -17,6 +17,17 @@ CAN CoreX is built around one practical idea: most CAN applications end up maint
 Hosted documentation is available as the
 [CAN CoreX Doxygen API Reference](https://adrianpietrzak1998.github.io/can_corex/docs/html/index.html).
 
+## Examples
+
+Practical integration examples are maintained in a separate repository:
+
+**[CAN CoreX Examples](https://github.com/AdrianPietrzak1998/can_corex_examples)**
+
+Use that repository as the starting point for wiring CAN CoreX into real
+projects. It is intended to show complete application-level usage around the
+library API, while this repository stays focused on the portable core library,
+tests, and API documentation.
+
 The main value of the library is:
 
 - table-driven RX handling with parser callbacks
@@ -25,7 +36,7 @@ The main value of the library is:
 - ISO-TP support for both classic CAN and CAN FD
 - optional bus monitoring and runtime statistics
 
-Version `2.2.2` keeps the `2.2.x` public API compatible and adds queue observability, queue flush/reset helpers, peak RX/TX queue usage statistics, stronger network replication overflow accounting, and safer ISO-TP TX enqueue error handling.
+Version `2.3.0` adds the optional `can_corex_utils` module with classic SLCAN text conversion, hex helpers, and linear signal encode/decode helpers while keeping the core CAN/ISO-TP runtime unchanged.
 
 ## Table of Contents
 
@@ -34,13 +45,14 @@ Version `2.2.2` keeps the `2.2.x` public API compatible and adds queue observabi
 3. [Bus Monitoring & Statistics](#bus-monitoring--statistics)
 4. [Quick Start](#quick-start)
 5. [API Reference](#api-reference)
-6. [Error Codes](#error-codes)
-7. [Data Structures](#data-structures)
-8. [Usage Examples](#usage-examples)
-9. [Advanced Build-Time Options](#advanced-build-time-options)
-10. [Best Practices](#best-practices)
-11. [Doxygen API Reference](#doxygen-api-reference)
-12. [Changelog](#changelog)
+6. [Utilities](#utilities)
+7. [Error Codes](#error-codes)
+8. [Data Structures](#data-structures)
+9. [Usage Examples](#usage-examples)
+10. [Advanced Build-Time Options](#advanced-build-time-options)
+11. [Best Practices](#best-practices)
+12. [Doxygen API Reference](#doxygen-api-reference)
+13. [Changelog](#changelog)
 
 ---
 
@@ -497,6 +509,95 @@ while (1) {
     CCX_Poll(&can_instance);
     // Other main loop tasks
 }
+```
+
+---
+
+## Utilities
+
+The optional `can_corex_utils` module is separate from the core runtime. Include
+`can_corex_utils.h` and link `can_corex_utils.c` only when these helpers are
+needed.
+
+### Classic SLCAN
+
+```c
+CCX_UTILS_Status_t CCX_SLCAN_Parse(const char *line, CCX_message_t *msg);
+CCX_UTILS_Status_t CCX_SLCAN_Format(const CCX_message_t *msg, char *out, size_t out_size);
+```
+
+Supported frame lines are classic CAN data frames:
+
+- `tIIILDD...` for 11-bit standard IDs
+- `TIIIIIIIILDD...` for 29-bit extended IDs
+
+The formatter always emits `\r` and `\0`. The parser accepts `\r`, `\n`,
+`\r\n`, or the end of the C string immediately after the frame. Remote frames
+are not represented by `CCX_message_t` and are returned as unsupported.
+
+```c
+CCX_message_t msg;
+char line[CCX_SLCAN_CLASSIC_MAX_LINE_LEN];
+
+CCX_SLCAN_Parse("t12381122334455667788\r", &msg);
+CCX_SLCAN_Format(&msg, line, sizeof(line));
+```
+
+### Hex Helpers
+
+```c
+CCX_UTILS_Status_t CCX_BytesToHex(const uint8_t *bytes, size_t byte_count, char *out, size_t out_size);
+CCX_UTILS_Status_t CCX_HexToBytes(const char *hex, size_t hex_len, uint8_t *out, size_t out_size,
+                                  size_t *bytes_written);
+```
+
+`CCX_BytesToHex()` emits uppercase hex without separators. `CCX_HexToBytes()`
+accepts uppercase and lowercase hex and requires an even number of input
+characters.
+
+### Linear Encode / Decode
+
+Double-based helpers:
+
+```c
+uint16_t CCX_EncodeLinearU16_Clamped(double physical, double factor, double offset);
+double CCX_DecodeLinearU16(uint16_t raw, double factor, double offset);
+```
+
+Float-based helpers use the `F` suffix:
+
+```c
+uint16_t CCX_EncodeLinearU16F_Clamped(float physical, float factor, float offset);
+float CCX_DecodeLinearU16F(uint16_t raw, float factor, float offset);
+```
+
+The full family covers unsigned and signed 8/16/32/64-bit raw values. Decode
+uses:
+
+```c
+physical = raw * factor + offset;
+```
+
+Encode uses:
+
+```c
+raw = round((physical - offset) / factor);
+```
+
+Values outside the raw type range are saturated by the `_Clamped` variants. If
+`factor` is zero, encode returns the minimum value for the target type.
+
+Encode followed by decode preserves the physical value when the input lies on
+the representable raw grid and the selected floating-point type can represent
+the intermediate values accurately enough. Off-grid values are quantized to the
+nearest raw integer first, so decode returns the nearest representable physical
+value. For 64-bit helpers, remember that `float` and `double` cannot represent
+every 64-bit integer exactly.
+
+```c
+double physical = 40.75;
+uint16_t raw = CCX_EncodeLinearU16_Clamped(physical, 0.25, 10.0);
+double decoded = CCX_DecodeLinearU16(raw, 0.25, 10.0);
 ```
 
 ---
@@ -1653,7 +1754,24 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v2.2.2 (2026-04-26)
+### Current Release: v2.3.0 (2026-05-18)
+- **Optional utilities module**:
+  - added `can_corex_utils.h` and `can_corex_utils.c`
+  - utility module is opt-in and does not change core CAN, CAN FD, ISO-TP, network, or bus-monitoring behavior
+- **Classic SLCAN helpers**:
+  - added `CCX_SLCAN_Parse()` and `CCX_SLCAN_Format()` for classic CAN data-frame text conversion
+  - supports standard and extended data frames compatible with Linux `slcan`/`slcand` workflows
+  - remote frames are reported as unsupported because `CCX_message_t` does not represent RTR
+- **Hex helpers**:
+  - added `CCX_BytesToHex()` and `CCX_HexToBytes()`
+  - conversion is allocation-free and caller-buffer based
+- **Linear encode/decode helpers**:
+  - added double-based and float-based helpers for unsigned and signed 8/16/32/64-bit raw values
+  - encode uses factor/offset scaling, nearest-integer quantization, and saturated `_Clamped` behavior
+  - documentation and tests cover exact round trips, quantization, clamping, zero factor, and 64-bit precision limits
+- **Breaking Changes**: None to existing core function signatures, enum values, or initialization APIs
+
+### Previous Release: v2.2.2 (2026-04-26)
 - **Queue observability**:
   - added `CCX_RX_GetDepth()`, `CCX_TX_GetDepth()`, `CCX_RX_GetFree()`, and `CCX_TX_GetFree()`
   - added `peak_rx_depth` and `peak_tx_depth` to global statistics
