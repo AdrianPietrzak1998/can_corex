@@ -4,7 +4,7 @@
 <a href="#changelog"><img alt="Version 2.3.0" src="https://img.shields.io/badge/Version-2.3.0-blue.svg"></a>
 <a href="https://en.wikipedia.org/wiki/C_(programming_language)"><img alt="Language: C" src="https://img.shields.io/badge/Language-C-blue.svg"></a>
 <img alt="Platform: Embedded" src="https://img.shields.io/badge/Platform-Embedded-orange.svg">
-<img alt="Tests: 700 passing" src="https://img.shields.io/badge/Tests-700%20passing-success.svg">
+<img alt="Tests: 705 passing" src="https://img.shields.io/badge/Tests-705%20passing-success.svg">
 <a href="#iso-tp"><img alt="ISO-TP validated with PEAK PCAN-ISO-TP API" src="https://img.shields.io/badge/ISO--TP-validated%20with%20PEAK%20PCAN--ISO--TP%20API-informational.svg"></a>
 <a href="https://github.com/AdrianPietrzak1998/can_corex/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social"></a>
 <a href="https://github.com/AdrianPietrzak1998/can_corex/network/members"><img alt="GitHub forks" src="https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social"></a>
@@ -51,8 +51,7 @@ Version `2.3.0` adds the optional `can_corex_utils` module with classic SLCAN te
 9. [Usage Examples](#usage-examples)
 10. [Advanced Build-Time Options](#advanced-build-time-options)
 11. [Best Practices](#best-practices)
-12. [Doxygen API Reference](#doxygen-api-reference)
-13. [Changelog](#changelog)
+12. [Changelog](#changelog)
 
 ---
 

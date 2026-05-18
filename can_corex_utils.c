@@ -10,6 +10,8 @@
 
 #include "can_corex_utils.h"
 #include <limits.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 
 #define CCX_UTILS_DOUBLE_U64_MAX_ROUND_DOWN 18446744073709549568.0
@@ -259,6 +261,11 @@ CCX_UTILS_Status_t CCX_BytesToHex(const uint8_t *bytes, size_t byte_count, char 
         return CCX_UTILS_NULL_PTR;
     }
 
+    if (byte_count > ((SIZE_MAX - 1U) / 2U))
+    {
+        return CCX_UTILS_WRONG_ARG;
+    }
+
     if (out_size < ((byte_count * 2U) + 1U))
     {
         return CCX_UTILS_BUFFER_TOO_SMALL;
@@ -335,6 +342,11 @@ static double CCX_UTILS_EncodeDoubleRaw(double physical, double factor, double o
     return CCX_UTILS_RoundDouble((physical - offset) / factor);
 }
 
+static bool CCX_UTILS_IsNanDouble(double value)
+{
+    return value != value;
+}
+
 static float CCX_UTILS_EncodeFloatRaw(float physical, float factor, float offset)
 {
     if (factor == 0.0f)
@@ -345,10 +357,19 @@ static float CCX_UTILS_EncodeFloatRaw(float physical, float factor, float offset
     return CCX_UTILS_RoundFloat((physical - offset) / factor);
 }
 
+static bool CCX_UTILS_IsNanFloat(float value)
+{
+    return value != value;
+}
+
 uint8_t CCX_EncodeLinearU8_Clamped(double physical, double factor, double offset)
 {
     double raw = CCX_UTILS_EncodeDoubleRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanDouble(raw))
+    {
+        return 0U;
+    }
     if (raw <= 0.0)
     {
         return 0U;
@@ -364,6 +385,10 @@ uint16_t CCX_EncodeLinearU16_Clamped(double physical, double factor, double offs
 {
     double raw = CCX_UTILS_EncodeDoubleRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanDouble(raw))
+    {
+        return 0U;
+    }
     if (raw <= 0.0)
     {
         return 0U;
@@ -379,6 +404,10 @@ uint32_t CCX_EncodeLinearU32_Clamped(double physical, double factor, double offs
 {
     double raw = CCX_UTILS_EncodeDoubleRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanDouble(raw))
+    {
+        return 0UL;
+    }
     if (raw <= 0.0)
     {
         return 0UL;
@@ -394,6 +423,10 @@ uint64_t CCX_EncodeLinearU64_Clamped(double physical, double factor, double offs
 {
     double raw = CCX_UTILS_EncodeDoubleRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanDouble(raw))
+    {
+        return 0ULL;
+    }
     if (raw <= 0.0)
     {
         return 0ULL;
@@ -409,6 +442,10 @@ int8_t CCX_EncodeLinearS8_Clamped(double physical, double factor, double offset)
 {
     double raw = CCX_UTILS_EncodeDoubleRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanDouble(raw))
+    {
+        return INT8_MIN;
+    }
     if (raw <= (double)INT8_MIN)
     {
         return INT8_MIN;
@@ -424,6 +461,10 @@ int16_t CCX_EncodeLinearS16_Clamped(double physical, double factor, double offse
 {
     double raw = CCX_UTILS_EncodeDoubleRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanDouble(raw))
+    {
+        return INT16_MIN;
+    }
     if (raw <= (double)INT16_MIN)
     {
         return INT16_MIN;
@@ -439,6 +480,10 @@ int32_t CCX_EncodeLinearS32_Clamped(double physical, double factor, double offse
 {
     double raw = CCX_UTILS_EncodeDoubleRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanDouble(raw))
+    {
+        return INT32_MIN;
+    }
     if (raw <= (double)INT32_MIN)
     {
         return INT32_MIN;
@@ -454,6 +499,10 @@ int64_t CCX_EncodeLinearS64_Clamped(double physical, double factor, double offse
 {
     double raw = CCX_UTILS_EncodeDoubleRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanDouble(raw))
+    {
+        return INT64_MIN;
+    }
     if (raw <= CCX_UTILS_DOUBLE_S64_MIN_EXACT)
     {
         return INT64_MIN;
@@ -509,6 +558,10 @@ uint8_t CCX_EncodeLinearU8F_Clamped(float physical, float factor, float offset)
 {
     float raw = CCX_UTILS_EncodeFloatRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanFloat(raw))
+    {
+        return 0U;
+    }
     if (raw <= 0.0f)
     {
         return 0U;
@@ -524,6 +577,10 @@ uint16_t CCX_EncodeLinearU16F_Clamped(float physical, float factor, float offset
 {
     float raw = CCX_UTILS_EncodeFloatRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanFloat(raw))
+    {
+        return 0U;
+    }
     if (raw <= 0.0f)
     {
         return 0U;
@@ -539,6 +596,10 @@ uint32_t CCX_EncodeLinearU32F_Clamped(float physical, float factor, float offset
 {
     float raw = CCX_UTILS_EncodeFloatRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanFloat(raw))
+    {
+        return 0UL;
+    }
     if (raw <= 0.0f)
     {
         return 0UL;
@@ -554,6 +615,10 @@ uint64_t CCX_EncodeLinearU64F_Clamped(float physical, float factor, float offset
 {
     float raw = CCX_UTILS_EncodeFloatRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanFloat(raw))
+    {
+        return 0ULL;
+    }
     if (raw <= 0.0f)
     {
         return 0ULL;
@@ -569,6 +634,10 @@ int8_t CCX_EncodeLinearS8F_Clamped(float physical, float factor, float offset)
 {
     float raw = CCX_UTILS_EncodeFloatRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanFloat(raw))
+    {
+        return INT8_MIN;
+    }
     if (raw <= (float)INT8_MIN)
     {
         return INT8_MIN;
@@ -584,6 +653,10 @@ int16_t CCX_EncodeLinearS16F_Clamped(float physical, float factor, float offset)
 {
     float raw = CCX_UTILS_EncodeFloatRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanFloat(raw))
+    {
+        return INT16_MIN;
+    }
     if (raw <= (float)INT16_MIN)
     {
         return INT16_MIN;
@@ -599,6 +672,10 @@ int32_t CCX_EncodeLinearS32F_Clamped(float physical, float factor, float offset)
 {
     float raw = CCX_UTILS_EncodeFloatRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanFloat(raw))
+    {
+        return INT32_MIN;
+    }
     if (raw <= (float)INT32_MIN)
     {
         return INT32_MIN;
@@ -614,6 +691,10 @@ int64_t CCX_EncodeLinearS64F_Clamped(float physical, float factor, float offset)
 {
     float raw = CCX_UTILS_EncodeFloatRaw(physical, factor, offset);
 
+    if (CCX_UTILS_IsNanFloat(raw))
+    {
+        return INT64_MIN;
+    }
     if (raw <= CCX_UTILS_FLOAT_S64_MIN_EXACT)
     {
         return INT64_MIN;
