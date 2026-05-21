@@ -561,7 +561,7 @@ static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
         CCX_TIME_t elapsed = (CCX_TIME_t)(CCX_GetPrimaryTick() - Instance->CCX_TX_table[i].LastTick);
         if (elapsed >= Instance->CCX_TX_table[i].SendFreq)
         {
-            Instance->CCX_TX_table[i].LastTick = CCX_GetPrimaryTick();
+            CCX_TIME_t current_tick = CCX_GetPrimaryTick();
 
 #if CCX_ENABLE_CANFD
             CCX_frame_format_t table_fmt = Instance->CCX_TX_table[i].FrameFormat;
@@ -588,7 +588,10 @@ static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
 #endif
             memcpy(msg.Data, Tmp, len);
 
-            CCX_TX_PushMsg(Instance, &msg);
+            if (CCX_TX_PushMsg(Instance, &msg) == CCX_OK)
+            {
+                Instance->CCX_TX_table[i].LastTick = current_tick;
+            }
         }
     }
 }
@@ -643,6 +646,12 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
     {
         return CCX_NULL_PTR;
     }
+
+    if (CCX_IsPrimaryTickRegistered() == 0U)
+    {
+        return CCX_MISSING_TIMEBASE;
+    }
+
     Instance->CCX_TX_table = CCX_TX_table;
     Instance->CCX_RX_table = CCX_RX_table;
     Instance->RxTableSize = RxTableSize;

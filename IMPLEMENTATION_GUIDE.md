@@ -1,6 +1,6 @@
 # CAN CoreX Implementation Guide
 
-**Version:** 2.2.2  
+**Version:** 2.3.1  
 **Author:** Adrian Pietrzak  
 **Date:** April 2026
 

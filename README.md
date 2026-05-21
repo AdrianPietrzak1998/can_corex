@@ -1,10 +1,10 @@
 ﻿# CAN CoreX
 
 <a href="https://opensource.org/licenses/MPL-2.0"><img alt="License: MPL 2.0" src="https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg"></a>
-<a href="#changelog"><img alt="Version 2.3.0" src="https://img.shields.io/badge/Version-2.3.0-blue.svg"></a>
+<a href="#changelog"><img alt="Version 2.3.1" src="https://img.shields.io/badge/Version-2.3.1-blue.svg"></a>
 <a href="https://en.wikipedia.org/wiki/C_(programming_language)"><img alt="Language: C" src="https://img.shields.io/badge/Language-C-blue.svg"></a>
 <img alt="Platform: Embedded" src="https://img.shields.io/badge/Platform-Embedded-orange.svg">
-<img alt="Tests: 705 passing" src="https://img.shields.io/badge/Tests-705%20passing-success.svg">
+<img alt="Tests: 715 passing" src="https://img.shields.io/badge/Tests-715%20passing-success.svg">
 <a href="#iso-tp"><img alt="ISO-TP validated with PEAK PCAN-ISO-TP API" src="https://img.shields.io/badge/ISO--TP-validated%20with%20PEAK%20PCAN--ISO--TP%20API-informational.svg"></a>
 <a href="https://github.com/AdrianPietrzak1998/can_corex/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social"></a>
 <a href="https://github.com/AdrianPietrzak1998/can_corex/network/members"><img alt="GitHub forks" src="https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social"></a>
@@ -36,7 +36,7 @@ The main value of the library is:
 - ISO-TP support for both classic CAN and CAN FD
 - optional bus monitoring and runtime statistics
 
-Version `2.3.0` adds the optional `can_corex_utils` module with classic SLCAN text conversion, hex helpers, and linear signal encode/decode helpers while keeping the core CAN/ISO-TP runtime unchanged.
+Version `2.3.1` hardens initialization and periodic TX behavior: `CCX_Init()` now reports a missing primary timebase explicitly, and periodic TX table entries retry instead of silently skipping a period when the TX queue is full.
 
 ## Table of Contents
 
@@ -1753,7 +1753,21 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v2.3.0 (2026-05-18)
+### Current Release: v2.3.1 (2026-05-21)
+- **Initialization hardening**:
+  - `CCX_Init()` now returns `CCX_MISSING_TIMEBASE` when the primary tick source has not been registered
+  - prevents silent `0` tick fallback during table `LastTick` initialization
+- **Version metadata**:
+  - added public `CCX_VERSION_MAJOR`, `CCX_VERSION_MINOR`, `CCX_VERSION_PATCH`, and `CCX_VERSION_STRING` macros
+- **Periodic TX reliability**:
+  - TX table `LastTick` is updated only after `CCX_TX_PushMsg()` accepts the generated message
+  - periodic messages retry on the next `CCX_Poll()` when the TX queue was full
+- **Tests**:
+  - added regression coverage for missing primary timebase detection
+  - added regression coverage for periodic TX retry after queue-full enqueue failure
+- **Breaking Changes**: None to existing function signatures, enum values, or initialization APIs
+
+### Previous Release: v2.3.0 (2026-05-18)
 - **Optional utilities module**:
   - added `can_corex_utils.h` and `can_corex_utils.c`
   - utility module is opt-in and does not change core CAN, CAN FD, ISO-TP, network, or bus-monitoring behavior

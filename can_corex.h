@@ -19,6 +19,11 @@ extern "C"
 {
 #endif
 
+#define CCX_VERSION_MAJOR 2
+#define CCX_VERSION_MINOR 3
+#define CCX_VERSION_PATCH 1
+#define CCX_VERSION_STRING "2.3.1"
+
 /**
  * @file can_corex.h
  * @brief Core CAN CoreX public API.
