@@ -19,10 +19,10 @@ extern "C"
 {
 #endif
 
-#define CCX_VERSION_MAJOR 2
-#define CCX_VERSION_MINOR 3
-#define CCX_VERSION_PATCH 1
-#define CCX_VERSION_STRING "2.3.1"
+#define CCX_VERSION_MAJOR 3
+#define CCX_VERSION_MINOR 0
+#define CCX_VERSION_PATCH 0
+#define CCX_VERSION_STRING "3.0.0"
 
 /**
  * @file can_corex.h
@@ -122,6 +122,28 @@ extern "C"
  */
 #ifndef CCX_RX_HASH_SIZE
 #define CCX_RX_HASH_SIZE 64
+#endif
+
+#if CCX_RX_BUFFER_SIZE < 2 || CCX_RX_BUFFER_SIZE > 65535 || CCX_TX_BUFFER_SIZE < 2 || CCX_TX_BUFFER_SIZE > 65535
+#error "CAN CoreX queue sizes must be between 2 and 65535."
+#endif
+
+#if CCX_RX_HASH_SIZE < 1 || CCX_RX_HASH_SIZE > 65535
+#error "CCX_RX_HASH_SIZE must be between 1 and 65535."
+#endif
+
+#if (defined(CCX_RX_SEARCH_LINEAR) + defined(CCX_RX_SEARCH_BINARY) + defined(CCX_RX_SEARCH_HASH)) > 1
+#error "Select only one CAN CoreX RX search strategy."
+#endif
+
+#if (defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT16) + defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT32) +                     \
+     defined(CCX_TIME_BASE_TYPE_CUSTOM_IS_UINT64)) > 1
+#error "Select only one primary timebase width."
+#endif
+
+#if (defined(CCX_HR_TIME_BASE_TYPE_CUSTOM_IS_UINT16) + defined(CCX_HR_TIME_BASE_TYPE_CUSTOM_IS_UINT32) +               \
+     defined(CCX_HR_TIME_BASE_TYPE_CUSTOM_IS_UINT64)) > 1
+#error "Select only one high-resolution timebase width."
 #endif
 
     /* ============================================================
@@ -495,6 +517,14 @@ typedef CCX_TIME_t CCX_HR_TIME_t;
     void CCX_Flush(CCX_instance_t *Instance);
     void CCX_Reset(CCX_instance_t *Instance);
     CCX_Status_t CCX_Poll(CCX_instance_t *Instance);
+    /**
+     * @brief Initialize an instance and validate its RX/TX tables.
+     * @note SendFunction and BusCheck must both be present for TX. With neither
+     * callback and no TX table, the instance supports RX-only Poll and rejects TX pushes.
+     * Nonempty TX entries require Data. DLC, ID, frame format, binary sort order,
+     * and hash capacity are validated before changing the instance.
+     * @return CCX_OK, CCX_NULL_PTR, CCX_WRONG_ARG, or CCX_MISSING_TIMEBASE.
+     */
     CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CCX_TX_table_t *CCX_TX_table,
                           uint16_t RxTableSize, uint16_t TxTableSize,
                           void (*SendFunction)(const CCX_instance_t *Instance, const CCX_message_t *msg),
@@ -617,6 +647,8 @@ extern CCX_HR_TIME_t *CCX_high_res_tick;
      *
      * @note This function does nothing if CCX_RX_SEARCH_HASH is not defined
      * @note Not needed for linear search or binary search modes
+     * @note An empty or oversized runtime table clears the hash. Init rejects
+     * sizes above CCX_RX_HASH_SIZE; a table exactly at capacity is supported.
      *
      * @code
      * // After modifying RX table

@@ -1,11 +1,11 @@
-﻿# CAN CoreX
+# CAN CoreX
 
 <a href="https://opensource.org/licenses/MPL-2.0"><img alt="License: MPL 2.0" src="https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg"></a>
-<a href="#changelog"><img alt="Version 2.3.1" src="https://img.shields.io/badge/Version-2.3.1-blue.svg"></a>
+<a href="#changelog"><img alt="Version 3.0.0" src="https://img.shields.io/badge/Version-3.0.0-blue.svg"></a>
 <a href="https://en.wikipedia.org/wiki/C_(programming_language)"><img alt="Language: C" src="https://img.shields.io/badge/Language-C-blue.svg"></a>
 <img alt="Platform: Embedded" src="https://img.shields.io/badge/Platform-Embedded-orange.svg">
-<img alt="Tests: 715 passing" src="https://img.shields.io/badge/Tests-715%20passing-success.svg">
-<a href="#iso-tp"><img alt="ISO-TP validated with PEAK PCAN-ISO-TP API" src="https://img.shields.io/badge/ISO--TP-validated%20with%20PEAK%20PCAN--ISO--TP%20API-informational.svg"></a>
+<img alt="Tests: 24 builds passing" src="https://img.shields.io/badge/Tests-24%20builds%20passing-success.svg">
+<a href="#iso-tp"><img alt="ISO-TP: Classic CAN and CAN FD" src="https://img.shields.io/badge/ISO--TP-Classic%20CAN%20%2B%20CAN%20FD-informational.svg"></a>
 <a href="https://github.com/AdrianPietrzak1998/can_corex/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/AdrianPietrzak1998/can_corex?style=social"></a>
 <a href="https://github.com/AdrianPietrzak1998/can_corex/network/members"><img alt="GitHub forks" src="https://img.shields.io/github/forks/AdrianPietrzak1998/can_corex?style=social"></a>
 
@@ -36,7 +36,7 @@ The main value of the library is:
 - ISO-TP support for both classic CAN and CAN FD
 - optional bus monitoring and runtime statistics
 
-Version `2.3.1` hardens initialization and periodic TX behavior: `CCX_Init()` now reports a missing primary timebase explicitly, and periodic TX table entries retry instead of silently skipping a period when the TX queue is full.
+Version `3.0.0` hardens memory safety, RX lookup, ISO-TP state transitions, callbacks, and Flow Control under queue pressure. ISO-TP Init fully constructs the instance without preliminary zeroing; calling it again intentionally restarts the session. See the migration notes in the changelog before upgrading from v2.x.
 
 ## Table of Contents
 
@@ -238,19 +238,25 @@ CCX_Status_t CCX_Init(
 **Returns**:
 - `CCX_OK`: Initialization successful
 - `CCX_NULL_PTR`: Invalid parameter combination
+- `CCX_WRONG_ARG`: Invalid ID, DLC, frame format, binary sort order, or hash capacity
+- `CCX_MISSING_TIMEBASE`: Primary tick source has not been registered
 
 **Important Notes**:
 - Must call `CCX_tick_variable_register()` BEFORE `CCX_Init()`
 - Initializes all buffer pointers to zero
 - Clears all buffers
 - Sets LastTick in tables to current time
+- TX callbacks must be supplied together. With neither callback and no TX table, `CCX_Poll()` supports RX-only operation; `CCX_TX_PushMsg()` returns `CCX_NULL_PTR`.
+- Nonempty TX entries require a valid `Data` pointer. `CCX_Poll()` also validates runtime TX table changes before copying data and reports invalid entries through its return status.
+- Binary RX tables must be sorted by ID. Duplicate IDs are supported; every search strategy selects the first entry matching ID, IDE, DLC, and frame-format family, including wildcard precedence.
+- Hash RX tables may contain up to `CCX_RX_HASH_SIZE` entries. Rebuilding an empty or oversized runtime table clears the hash instead of retaining old entries or looping indefinitely.
 - In FD builds, does **not** zero `FrameFormat` in RX table entries - `CCX_FRAME_FORMAT_CLASSIC=0` is the natural C aggregate-initializer default; if using field-by-field assignment (no aggregate initializer), call `memset(rx_table, 0, sizeof(rx_table))` before populating
 
 **Example**:
 ```c
 CCX_instance_t can_instance;
-CCX_RX_table_t rx_table[5];
-CCX_TX_table_t tx_table[3];
+CCX_RX_table_t rx_table[5] = {0};
+CCX_TX_table_t tx_table[3] = {0};
 
 // Register tick source first
 CCX_tick_variable_register(&system_tick);
@@ -949,8 +955,14 @@ CAN CoreX includes ISO 15765-2 (ISO-TP) for classic CAN and CAN FD transports.
 
 ### Important Semantics
 
-- Header selection is based on ISO-TP payload length **before padding**
+- SF header selection follows the **final CAN_DL**: FD frames longer than 8 bytes use the two-byte SF escape, including padded PDU lengths `1..7`; short unpadded frames retain the one-byte header
 - Padding changes CAN frame payload length, not reported PDU length
+- `CCX_ISOTP_TX_Init()` and `CCX_ISOTP_RX_Init()` fully initialize arbitrary instance memory; no zeroing or preliminary call is required. Reinitialization discards an active session without callbacks and starts from `IDLE`, replacing the previous `BUSY` behavior. A failed Init leaves the instance disabled. `Config` may point to the existing `Instance->Config`.
+- Init and Abort do not remove frames already copied into the CAN TX queue. Serialize access to instances and handle queued traffic at the integration layer when restarting an endpoint.
+- Completion/error cleanup finishes before the corresponding callback. TX `OnError` may retry `CCX_ISOTP_Transmit()`. RX start/progress callbacks may call Abort or Init; the interrupted parser operation then stops without emitting stale CTS or completion.
+- A valid SF replaces an active fragmented RX, reporting `CCX_ISOTP_ERROR_SEQUENCE` for the old session before delivering the SF. If that error callback aborts or reinitializes the endpoint, processing of the replacing SF also stops.
+- Failure to enqueue FC (initial CTS, block-boundary CTS, or OVFLW) terminates RX with `CCX_ISOTP_ERROR_BUSY`; there is no silent wait or automatic FC retry.
+- The internal RX instance layout includes a callback guard; rebuild applications and library sources together with the same configuration macros.
 - In FD builds, `CCX_ISOTP_Length_t` is `uint32_t`; in classic-only builds it remains `uint16_t`
 - In FD builds, a classic ISO-TP instance still keeps the classic `4095`-byte limit
 - `OnReceiveProgress` reports a delta since the previous callback, not an absolute offset
@@ -1753,7 +1765,41 @@ Mozilla Public License 2.0 - see LICENSE file for details.
 
 ## Changelog
 
-### Current Release: v2.3.1 (2026-05-21)
+### Current Release: v3.0.0 (2026-10-28)
+
+- **Breaking changes and migration from v2.x**:
+  - `CCX_ISOTP_TX_Init()` and `CCX_ISOTP_RX_Init()` fully construct arbitrary instance memory; no preliminary initializer, zeroing, or new public function is required
+  - calling Init during an active transfer now discards that session without callbacks and starts from `IDLE`, instead of returning `CCX_ISOTP_ERROR_BUSY`; call Init only when intentionally restarting an endpoint
+  - a failed ISO-TP Init leaves the instance disabled; an existing `Instance->Config` may be passed back to Init safely
+  - Init and Abort do not remove CAN frames already copied into the TX queue; applications must account for queued traffic when restarting an endpoint
+  - completion/error cleanup runs before callbacks; consume the callback arguments rather than relying on completed-transfer runtime fields remaining populated
+  - `CCX_ISOTP_RX_t` has an additional internal callback guard: rebuild the library and all consumers together; existing public function signatures and enum values are unchanged
+  - invalid standard/extended IDs, frame formats, table configuration, and malformed SF headers are now rejected instead of being accepted accidentally
+- **Memory safety and core validation**:
+  - Init and Poll validate periodic TX entries before copying data, preventing out-of-bounds writes from Classic DLC values above 8
+  - nonempty TX entries require a valid Data pointer; empty frames may use NULL Data
+  - RX-only instances can Poll without TX callbacks; dynamic TX is rejected and partially configured TX callback pairs fail Init
+- **Consistent RX lookup**:
+  - binary search checks all candidates with the same ID and preserves first-match table order, including wildcard, IDE, and Classic/FD matching
+  - empty hash tables are cleared at Init/RebuildHash, and lookup validates stored indices against the current table size
+  - oversized hash tables fail Init instead of relying on assertions; probing is bounded and tables exactly at hash capacity are supported
+  - invalid queue/hash sizes and conflicting search strategies or timebase widths produce compile-time diagnostics
+- **ISO-TP correctness and overload handling**:
+  - a valid SF cancels an active fragmented RX with a sequence error before delivering the new payload; old CF frames cannot complete corrupted data
+  - FD SF headers follow final CAN_DL: frames longer than 8 bytes use the escape header, including short padded payloads
+  - parser length checks precede PCI/header reads and unsigned subtraction
+  - TX retries from error callbacks and RX Abort/Init from start/progress callbacks no longer get overwritten by stale cleanup or parser work
+  - failed enqueue of initial CTS, block-boundary CTS, or OVFLW ends RX with `CCX_ISOTP_ERROR_BUSY`; there is no silent wait or automatic FC retry
+- **Network lifecycle**:
+  - deinitializing an absent network on an empty registry, including repeated teardown of the last network, returns the not-found status safely
+- **Validation and documentation**:
+  - 24 passing build/test configurations: Classic/FD, linear/binary/hash, HR/no-HR, with standard and optimized `-O2 -DNDEBUG -Werror` builds
+  - regression coverage includes callback-driven session replacement, TX/FC queue pressure, empty/full hash tables, and SF padding across all supported TxDL values
+  - 15 compile-time configuration checks and six parser smoke configurations with 100000 iterations each
+  - clang-format, cppcheck exhaustive, GCC analyzer, and Doxygen checks pass
+  - new hardware interoperability tests were not run for this release; existing driver-confirmation and informational-timeout limitations remain documented
+
+### Previous Release: v2.3.1 (2026-05-21)
 - **Initialization hardening**:
   - `CCX_Init()` now returns `CCX_MISSING_TIMEBASE` when the primary tick source has not been registered
   - prevents silent `0` tick fallback during table `LastTick` initialization

@@ -372,6 +372,7 @@ typedef uint16_t CCX_ISOTP_Length_t;
         uint8_t ActiveRxDL;                      /* CAN_DL announced by FF */
         uint8_t InitValid;                       /* Successful init state */
         CCX_ISOTP_LengthFormat_t LengthFormat;
+        const void *CallbackToken; /* Internal guard invalidated by Init/Abort or a replacement session */
     };
 
     /**
@@ -431,6 +432,9 @@ typedef uint16_t CCX_ISOTP_Length_t;
      * @param Config Pointer to TX configuration
      * @return CCX_ISOTP_OK on success, error code otherwise
      *
+     * @note No prior zero-initialization is required. Every Init discards any previous
+     * transfer without callbacks; failure leaves the instance disabled. Config may
+     * point to Instance->Config. Frames already queued in CAN CoreX are not removed.
      * @note In FD builds, `Config->TxDL` is validated only for FD sessions.
      * Classic sessions keep the classic `4095`-byte transport limit even when
      * `CCX_ENABLE_CANFD=1`.
@@ -459,9 +463,8 @@ typedef uint16_t CCX_ISOTP_Length_t;
      * otherwise
      *
      * @note Data pointer must remain valid until OnTransmitComplete is called
-     * @note Header selection is based on ISO-TP payload length before padding.
-     * For example, in FD mode payloads `1..7` still use the standard single-frame
-     * header even if CAN padding expands the frame to a larger `TxDL`.
+     * @note FD single frames with a final CAN payload longer than 8 bytes use the
+     * two-byte SF escape header, including padded payloads of 1..7 bytes.
      */
     CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *Data, CCX_ISOTP_Length_t Length);
 
@@ -561,6 +564,14 @@ typedef uint16_t CCX_ISOTP_Length_t;
 
     /**
      * @brief Initialize ISO-TP RX instance
+     *
+     * @note No prior zero-initialization is required. Every Init discards any previous
+     * transfer without callbacks; failure leaves the instance disabled. Config may
+     * point to Instance->Config. Already queued CAN frames are not removed.
+     * @note A valid SF replaces an active fragmented RX with a sequence error for
+     * the old transfer. Failure to queue FC terminates RX with ERROR_BUSY.
+     * @note RX start/progress callbacks may call Abort or Init. This cancels the
+     * interrupted parser operation. Completion/error cleanup occurs before callbacks.
      *
      * @param Instance Pointer to RX instance structure
      * @param CanInstance Pointer to CAN CoreX instance

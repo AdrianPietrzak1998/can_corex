@@ -431,6 +431,7 @@ static inline CCX_ISOTP_Status_t ISOTP_AbortTXOnCANQueueError(CCX_ISOTP_TX_t *In
 
 static inline void ISOTP_ResetRXTransfer(CCX_ISOTP_RX_t *Instance)
 {
+    Instance->CallbackToken = NULL;
     Instance->RxDataLength = 0U;
     Instance->RxDataOffset = 0U;
     Instance->SequenceNumber = 0U;
@@ -440,18 +441,73 @@ static inline void ISOTP_ResetRXTransfer(CCX_ISOTP_RX_t *Instance)
     Instance->LengthFormat = CCX_ISOTP_LENGTH_FORMAT_STANDARD;
 }
 
-static inline uint8_t ISOTP_IsTXTransferActive(const CCX_ISOTP_TX_t *Instance)
+static void ISOTP_FinishTXError(CCX_ISOTP_TX_t *Instance, CCX_ISOTP_Status_t Error)
 {
-    return (uint8_t)(
-        Instance->InitValid &&
-        (Instance->State == CCX_ISOTP_TX_STATE_WAIT_FC || Instance->State == CCX_ISOTP_TX_STATE_SENDING_CF) &&
-        (Instance->TxData != NULL || Instance->TxDataLength > 0U));
+    Instance->State = CCX_ISOTP_TX_STATE_IDLE;
+    ISOTP_ResetTXTransfer(Instance);
+    if (Instance->Config.OnError != NULL)
+    {
+        Instance->Config.OnError(Instance, Error, Instance->Config.UserData);
+    }
 }
 
-static inline uint8_t ISOTP_IsRXTransferActive(const CCX_ISOTP_RX_t *Instance)
+static uint8_t ISOTP_FinishRXError(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Status_t Error)
 {
-    return (uint8_t)(Instance->InitValid && Instance->State == CCX_ISOTP_RX_STATE_RECEIVING_CF &&
-                     Instance->RxDataLength > 0U);
+    uint8_t callback_token;
+    Instance->State = CCX_ISOTP_RX_STATE_IDLE;
+    ISOTP_ResetRXTransfer(Instance);
+    if (Instance->Config.OnError != NULL)
+    {
+        /* cppcheck-suppress autoVariables
+         * Compared only during this callback, never dereferenced. Init/Abort invalidates
+         * the identity; otherwise it is cleared below before the local goes out of scope.
+         */
+        Instance->CallbackToken = &callback_token;
+        Instance->Config.OnError(Instance, Error, Instance->Config.UserData);
+        if (Instance->CallbackToken != &callback_token)
+        {
+            return 0U;
+        }
+        Instance->CallbackToken = NULL;
+    }
+    return 1U;
+}
+
+static uint8_t ISOTP_NotifyRXProgress(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_Length_t Delta)
+{
+    uint8_t callback_token;
+    Instance->LastProgressCallback = Instance->RxDataOffset;
+    /* cppcheck-suppress autoVariables
+     * Scoped callback identity, cleared or invalidated before this function returns.
+     */
+    Instance->CallbackToken = &callback_token;
+    Instance->Config.OnReceiveProgress(Instance, Delta, Instance->RxDataLength, Instance->Config.UserData);
+    if (Instance->CallbackToken != &callback_token)
+    {
+        return 0U;
+    }
+    Instance->CallbackToken = NULL;
+    return 1U;
+}
+
+static uint8_t ISOTP_IsValidAddress(uint32_t ID, uint8_t IDE_flag)
+{
+    return (uint8_t)(IDE_flag <= 1U && ID <= (IDE_flag ? 0x1FFFFFFFUL : 0x7FFUL));
+}
+
+static uint8_t ISOTP_IsValidCANFrame(const CCX_message_t *Msg)
+{
+#if CCX_ENABLE_CANFD
+    if (Msg->FrameFormat > CCX_FRAME_FORMAT_FD_BRS)
+    {
+        return 0U;
+    }
+    if (Msg->FrameFormat != CCX_FRAME_FORMAT_CLASSIC)
+    {
+        return 1U;
+    }
+#endif
+    return (uint8_t)(Msg->DLC <= ISOTP_CLASSIC_CAN_DL);
 }
 
 void CCX_ISOTP_TX_Config_Init(CCX_ISOTP_TX_Config_t *Config, uint32_t TxID, uint8_t IDE_TxID, CCX_TIME_t N_Bs,
@@ -501,44 +557,44 @@ void CCX_ISOTP_TX_Config_InitFD(CCX_ISOTP_TX_Config_t *Config, uint32_t TxID, ui
 CCX_ISOTP_Status_t CCX_ISOTP_TX_Init(CCX_ISOTP_TX_t *Instance, CCX_instance_t *CanInstance,
                                      const CCX_ISOTP_TX_Config_t *Config)
 {
-    if (NULL == Instance || NULL == CanInstance || NULL == Config)
+    CCX_ISOTP_TX_Config_t config = {0};
+    if (Instance == NULL)
     {
         return CCX_ISOTP_ERROR_NULL_PTR;
     }
-
-#ifndef CCX_DISABLE_HIGH_RES_TIMEBASE
-    if (!CCX_IsHighResTickRegistered())
+    if (Config != NULL)
     {
-        memset(Instance, 0, sizeof(CCX_ISOTP_TX_t));
+        config = *Config;
+    }
+    memset(Instance, 0, sizeof(*Instance));
+    if (CanInstance == NULL || Config == NULL)
+    {
+        return CCX_ISOTP_ERROR_NULL_PTR;
+    }
+    if (!CCX_IsPrimaryTickRegistered()
+#ifndef CCX_DISABLE_HIGH_RES_TIMEBASE
+        || !CCX_IsHighResTickRegistered()
+#endif
+    )
+    {
         return CCX_ISOTP_ERROR_MISSING_TIMEBASE;
     }
-#endif
-
-    if (ISOTP_IsTXTransferActive(Instance))
+    if (!ISOTP_IsValidAddress(config.TxID, config.IDE_TxID))
     {
-        return CCX_ISOTP_ERROR_BUSY;
+        return CCX_ISOTP_ERROR_INVALID_ARG;
     }
-
 #if CCX_ENABLE_CANFD
-    uint8_t active_tx_dl = ISOTP_GetConfiguredTxDL(Config->FrameFormat, Config->TxDL);
-    if (!ISOTP_IsValidTxDL(active_tx_dl))
+    if (config.FrameFormat > CCX_FRAME_FORMAT_FD_BRS ||
+        !ISOTP_IsValidTxDL(ISOTP_GetConfiguredTxDL(config.FrameFormat, config.TxDL)))
     {
         return CCX_ISOTP_ERROR_INVALID_ARG;
     }
 #endif
-
-    memcpy(&Instance->Config, Config, sizeof(CCX_ISOTP_TX_Config_t));
+    Instance->Config = config;
     Instance->CanInstance = CanInstance;
-    Instance->State = CCX_ISOTP_TX_STATE_IDLE;
-    Instance->LastTick = 0;
-    Instance->LastHighResTick = 0;
-    Instance->STminTicks = 0U;
-    Instance->STminHighResTicks = 0U;
-    Instance->STminUsesHighRes = 0U;
-    Instance->MaxWaitFrames = ISOTP_GetConfiguredMaxWaitFrames(Config->MaxWaitFrames);
+    Instance->MaxWaitFrames = ISOTP_GetConfiguredMaxWaitFrames(config.MaxWaitFrames);
     Instance->InitValid = 1U;
     ISOTP_ResetTXTransfer(Instance);
-
     return CCX_ISOTP_OK;
 }
 
@@ -551,7 +607,11 @@ CCX_ISOTP_Status_t CCX_ISOTP_TX_Abort(CCX_ISOTP_TX_t *Instance)
         return CCX_ISOTP_ERROR_NULL_PTR;
     }
 
-    was_active = ISOTP_IsTXTransferActive(Instance);
+    if (!Instance->InitValid)
+    {
+        return CCX_ISOTP_ERROR_INVALID_ARG;
+    }
+    was_active = (uint8_t)(Instance->State != CCX_ISOTP_TX_STATE_IDLE);
     Instance->State = CCX_ISOTP_TX_STATE_IDLE;
     ISOTP_ResetTXTransfer(Instance);
 
@@ -631,7 +691,8 @@ CCX_ISOTP_Status_t CCX_ISOTP_Transmit(CCX_ISOTP_TX_t *Instance, const uint8_t *D
 
     if (Length <= (CCX_ISOTP_Length_t)single_frame_max)
     {
-        if (ISOTP_IsExtendedSingleFrame(frame_format, tx_dl, Length))
+        if (ISOTP_IsExtendedSingleFrame(frame_format, tx_dl, Length) ||
+            (ISOTP_IsFDFrameFormat(frame_format) && tx_dl > ISOTP_CLASSIC_CAN_DL && Instance->Config.Padding.Enable))
         {
             frame[0] = ISOTP_EXTENDED_SF_ESCAPE;
             frame[1] = (uint8_t)Length;
@@ -739,12 +800,7 @@ static inline void CCX_ISOTP_TX_HandleFlowControl(CCX_ISOTP_TX_t *Instance, cons
 
     if (ISOTP_GetMessageDataLength(msg) < ISOTP_FC_FRAME_DATA_SIZE)
     {
-        Instance->State = CCX_ISOTP_TX_STATE_IDLE;
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
-        }
-        ISOTP_ResetTXTransfer(Instance);
+        ISOTP_FinishTXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
         return;
     }
 
@@ -767,31 +823,16 @@ static inline void CCX_ISOTP_TX_HandleFlowControl(CCX_ISOTP_TX_t *Instance, cons
         }
         if (Instance->WaitFramesRemaining == 0U)
         {
-            Instance->State = CCX_ISOTP_TX_STATE_IDLE;
-            if (Instance->Config.OnError != NULL)
-            {
-                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_WAIT_EXCEEDED, Instance->Config.UserData);
-            }
-            ISOTP_ResetTXTransfer(Instance);
+            ISOTP_FinishTXError(Instance, CCX_ISOTP_ERROR_WAIT_EXCEEDED);
         }
         break;
 
     case CCX_ISOTP_FC_OVFLW:
-        Instance->State = CCX_ISOTP_TX_STATE_IDLE;
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_OVERFLOW, Instance->Config.UserData);
-        }
-        ISOTP_ResetTXTransfer(Instance);
+        ISOTP_FinishTXError(Instance, CCX_ISOTP_ERROR_OVERFLOW);
         break;
 
     default:
-        Instance->State = CCX_ISOTP_TX_STATE_IDLE;
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_SEQUENCE, Instance->Config.UserData);
-        }
-        ISOTP_ResetTXTransfer(Instance);
+        ISOTP_FinishTXError(Instance, CCX_ISOTP_ERROR_SEQUENCE);
         break;
     }
 }
@@ -814,12 +855,7 @@ static inline void CCX_ISOTP_TX_SendConsecutiveFrame(CCX_ISOTP_TX_t *Instance)
 
     if (Instance->TxData == NULL)
     {
-        Instance->State = CCX_ISOTP_TX_STATE_IDLE;
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
-        }
-        ISOTP_ResetTXTransfer(Instance);
+        ISOTP_FinishTXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
         return;
     }
 
@@ -837,12 +873,7 @@ static inline void CCX_ISOTP_TX_SendConsecutiveFrame(CCX_ISOTP_TX_t *Instance)
                                            (uint8_t)(data_len == data_capacity));
     if (target_can_dl == ISOTP_INVALID_CAN_DL)
     {
-        Instance->State = CCX_ISOTP_TX_STATE_IDLE;
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
-        }
-        ISOTP_ResetTXTransfer(Instance);
+        ISOTP_FinishTXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
         return;
     }
 
@@ -911,12 +942,7 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
         CCX_TIME_t base_delta = (CCX_TIME_t)(current_tick - Instance->LastTick);
         if (Instance->Config.N_Bs > 0U && base_delta >= Instance->Config.N_Bs)
         {
-            Instance->State = CCX_ISOTP_TX_STATE_IDLE;
-            if (Instance->Config.OnError != NULL)
-            {
-                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT_FC, Instance->Config.UserData);
-            }
-            ISOTP_ResetTXTransfer(Instance);
+            ISOTP_FinishTXError(Instance, CCX_ISOTP_ERROR_TIMEOUT_FC);
         }
         break;
     }
@@ -925,12 +951,7 @@ void CCX_ISOTP_TX_Poll(CCX_ISOTP_TX_t *Instance)
         CCX_TIME_t base_delta = (CCX_TIME_t)(current_tick - Instance->LastTick);
         if (Instance->Config.N_Cs > 0U && base_delta > Instance->Config.N_Cs)
         {
-            Instance->State = CCX_ISOTP_TX_STATE_IDLE;
-            if (Instance->Config.OnError != NULL)
-            {
-                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT_CF_TX, Instance->Config.UserData);
-            }
-            ISOTP_ResetTXTransfer(Instance);
+            ISOTP_FinishTXError(Instance, CCX_ISOTP_ERROR_TIMEOUT_CF_TX);
             break;
         }
 
@@ -1019,41 +1040,39 @@ void CCX_ISOTP_RX_Config_InitFD(
 CCX_ISOTP_Status_t CCX_ISOTP_RX_Init(CCX_ISOTP_RX_t *Instance, CCX_instance_t *CanInstance,
                                      const CCX_ISOTP_RX_Config_t *Config)
 {
-    if (NULL == Instance || NULL == CanInstance || NULL == Config)
+    CCX_ISOTP_RX_Config_t config = {0};
+    if (Instance == NULL)
     {
         return CCX_ISOTP_ERROR_NULL_PTR;
     }
-
-    if (NULL == Config->RxBuffer)
+    if (Config != NULL)
+    {
+        config = *Config;
+    }
+    memset(Instance, 0, sizeof(*Instance));
+    if (CanInstance == NULL || Config == NULL || config.RxBuffer == NULL)
     {
         return CCX_ISOTP_ERROR_NULL_PTR;
     }
-
-    if (Config->RxBufferSize == 0U)
+    if (config.RxBufferSize == 0U || !ISOTP_IsValidAddress(config.TxID, config.IDE_TxID))
     {
         return CCX_ISOTP_ERROR_INVALID_ARG;
     }
-
-    if (ISOTP_IsRXTransferActive(Instance))
+    if (!CCX_IsPrimaryTickRegistered())
     {
-        return CCX_ISOTP_ERROR_BUSY;
+        return CCX_ISOTP_ERROR_MISSING_TIMEBASE;
     }
-
 #if CCX_ENABLE_CANFD
-    uint8_t active_tx_dl = ISOTP_GetConfiguredTxDL(Config->FrameFormat, Config->FC_TxDL);
-    if (!ISOTP_IsValidTxDL(active_tx_dl))
+    if (config.FrameFormat > CCX_FRAME_FORMAT_FD_BRS ||
+        !ISOTP_IsValidTxDL(ISOTP_GetConfiguredTxDL(config.FrameFormat, config.FC_TxDL)))
     {
         return CCX_ISOTP_ERROR_INVALID_ARG;
     }
 #endif
-
-    memcpy(&Instance->Config, Config, sizeof(CCX_ISOTP_RX_Config_t));
+    Instance->Config = config;
     Instance->CanInstance = CanInstance;
-    Instance->State = CCX_ISOTP_RX_STATE_IDLE;
-    Instance->LastTick = 0;
     Instance->InitValid = 1U;
     ISOTP_ResetRXTransfer(Instance);
-
     return CCX_ISOTP_OK;
 }
 
@@ -1071,7 +1090,7 @@ CCX_ISOTP_Status_t CCX_ISOTP_RX_Abort(CCX_ISOTP_RX_t *Instance)
         return CCX_ISOTP_ERROR_INVALID_ARG;
     }
 
-    was_active = ISOTP_IsRXTransferActive(Instance);
+    was_active = (uint8_t)(Instance->State != CCX_ISOTP_RX_STATE_IDLE);
     Instance->State = CCX_ISOTP_RX_STATE_IDLE;
     ISOTP_ResetRXTransfer(Instance);
 
@@ -1083,15 +1102,11 @@ CCX_ISOTP_Status_t CCX_ISOTP_RX_Abort(CCX_ISOTP_RX_t *Instance)
     return CCX_ISOTP_OK;
 }
 
-static inline void CCX_ISOTP_RX_SendFlowControl(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_FC_FS_t FlowStatus)
+static CCX_Status_t CCX_ISOTP_RX_SendFlowControl(CCX_ISOTP_RX_t *Instance, CCX_ISOTP_FC_FS_t FlowStatus)
 {
     uint8_t frame[ISOTP_CAN_FRAME_MAX_PAYLOAD] = {0};
-    uint8_t target_can_dl;
     uint8_t frame_format;
     uint8_t tx_dl;
-
-    assert(Instance != NULL);
-
 #if CCX_ENABLE_CANFD
     frame_format = Instance->Config.FrameFormat;
     tx_dl = ISOTP_GetConfiguredTxDL(frame_format, Instance->Config.FC_TxDL);
@@ -1099,90 +1114,66 @@ static inline void CCX_ISOTP_RX_SendFlowControl(CCX_ISOTP_RX_t *Instance, CCX_IS
     frame_format = CCX_FRAME_FORMAT_CLASSIC;
     tx_dl = ISOTP_CLASSIC_CAN_DL;
 #endif
-
     frame[0] = (uint8_t)(CCX_ISOTP_PCI_FC | (FlowStatus & ISOTP_PCI_VALUE_MASK));
     frame[1] = Instance->Config.BS;
     frame[2] = Instance->Config.STmin;
-
-    target_can_dl =
+    uint8_t target_can_dl =
         ISOTP_GetTransmitCanDL(frame_format, tx_dl, ISOTP_FC_FRAME_DATA_SIZE, &Instance->Config.Padding, 0U);
     if (target_can_dl == ISOTP_INVALID_CAN_DL)
     {
-        return;
+        return CCX_WRONG_ARG;
     }
-
-    (void)ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
-                               ISOTP_FC_FRAME_DATA_SIZE, target_can_dl, &Instance->Config.Padding
+    return ISOTP_SendCANMessage(Instance->CanInstance, Instance->Config.TxID, Instance->Config.IDE_TxID, frame,
+                                ISOTP_FC_FRAME_DATA_SIZE, target_can_dl, &Instance->Config.Padding
 #if CCX_ENABLE_CANFD
-                               ,
-                               frame_format
+                                ,
+                                frame_format
 #endif
     );
 }
 
-static inline void CCX_ISOTP_RX_HandleSingleFrame(CCX_ISOTP_RX_t *Instance, const CCX_message_t *msg)
+static void CCX_ISOTP_RX_HandleSingleFrame(CCX_ISOTP_RX_t *Instance, const CCX_message_t *msg)
 {
+    uint8_t can_dl = ISOTP_GetMessageDataLength(msg);
+    uint8_t frame_format = ISOTP_GetMessageFrameFormat(msg);
+    uint8_t header_size = ISOTP_STANDARD_SF_HEADER_SIZE;
     CCX_ISOTP_Length_t data_len;
-    uint8_t frame_format;
-    uint8_t can_dl;
-    uint8_t sf_max;
-    uint8_t header_size;
-
-    assert(Instance != NULL);
-    assert(msg != NULL);
-
-    frame_format = ISOTP_GetMessageFrameFormat(msg);
-    can_dl = ISOTP_GetMessageDataLength(msg);
-    sf_max = ISOTP_GetSingleFrameMaxPayload(frame_format, can_dl);
-
-    if (ISOTP_IsFDFrameFormat(frame_format) && msg->Data[0] == ISOTP_EXTENDED_SF_ESCAPE)
+    if (ISOTP_IsFDFrameFormat(frame_format) && can_dl > ISOTP_CLASSIC_CAN_DL)
     {
-        header_size = ISOTP_EXTENDED_SF_HEADER_SIZE;
-        data_len = ISOTP_GetExtendedSFDataLength(msg);
-        if (data_len <= (CCX_ISOTP_Length_t)(ISOTP_CLASSIC_CAN_DL - ISOTP_STANDARD_SF_HEADER_SIZE) ||
-            data_len > (CCX_ISOTP_Length_t)sf_max)
+        if (msg->Data[0] != ISOTP_EXTENDED_SF_ESCAPE)
         {
-            if (Instance->Config.OnError != NULL)
-            {
-                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
-            }
+            (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
             return;
         }
+        header_size = ISOTP_EXTENDED_SF_HEADER_SIZE;
+        data_len = ISOTP_GetExtendedSFDataLength(msg);
     }
     else
     {
-        header_size = ISOTP_STANDARD_SF_HEADER_SIZE;
-        data_len = (CCX_ISOTP_Length_t)ISOTP_GetStandardSFDataLength(msg);
-        if (data_len == 0U || data_len > (CCX_ISOTP_Length_t)(ISOTP_CLASSIC_CAN_DL - ISOTP_STANDARD_SF_HEADER_SIZE))
+        data_len = ISOTP_GetStandardSFDataLength(msg);
+        if (data_len > ISOTP_CLASSIC_CAN_DL - ISOTP_STANDARD_SF_HEADER_SIZE)
         {
-            if (Instance->Config.OnError != NULL)
-            {
-                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
-            }
+            (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
             return;
         }
     }
-
-    if ((CCX_ISOTP_Length_t)(can_dl - header_size) < data_len)
+    if (can_dl < header_size || data_len == 0U || data_len > (CCX_ISOTP_Length_t)(can_dl - header_size))
     {
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
-        }
+        (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
         return;
     }
-
     if (data_len > Instance->Config.RxBufferSize)
     {
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_BUFFER_TOO_SMALL, Instance->Config.UserData);
-        }
+        (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_BUFFER_TOO_SMALL);
         return;
     }
-
+    if (Instance->State != CCX_ISOTP_RX_STATE_IDLE && !ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_SEQUENCE))
+    {
+        return;
+    }
     memcpy(Instance->Config.RxBuffer, &msg->Data[header_size], (size_t)data_len);
-
+    Instance->State = CCX_ISOTP_RX_STATE_IDLE;
+    ISOTP_ResetRXTransfer(Instance);
     if (Instance->Config.OnReceiveComplete != NULL)
     {
         Instance->Config.OnReceiveComplete(Instance, Instance->Config.RxBuffer, data_len, Instance->Config.UserData);
@@ -1196,23 +1187,19 @@ static inline void CCX_ISOTP_RX_StartFirstFrame(CCX_ISOTP_RX_t *Instance, const 
     uint8_t header_size = ISOTP_GetFirstFrameHeaderSize(length_format);
     uint8_t first_payload_bytes = ISOTP_GetFirstFrameDataCapacity(can_dl, length_format);
 
-    if (Instance->State != CCX_ISOTP_RX_STATE_IDLE && Instance->Config.OnError != NULL)
+    if (Instance->State != CCX_ISOTP_RX_STATE_IDLE && !ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_SEQUENCE))
     {
-        Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_SEQUENCE, Instance->Config.UserData);
+        return;
     }
 
     if (total_len > Instance->Config.RxBufferSize)
     {
-        CCX_ISOTP_RX_SendFlowControl(Instance, CCX_ISOTP_FC_OVFLW);
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_BUFFER_TOO_SMALL, Instance->Config.UserData);
-        }
-        Instance->State = CCX_ISOTP_RX_STATE_IDLE;
-        ISOTP_ResetRXTransfer(Instance);
+        CCX_Status_t status = CCX_ISOTP_RX_SendFlowControl(Instance, CCX_ISOTP_FC_OVFLW);
+        (void)ISOTP_FinishRXError(Instance, status == CCX_OK ? CCX_ISOTP_ERROR_BUFFER_TOO_SMALL : CCX_ISOTP_ERROR_BUSY);
         return;
     }
 
+    Instance->CallbackToken = NULL;
     memcpy(Instance->Config.RxBuffer, &msg->Data[header_size], first_payload_bytes);
 
     Instance->RxDataLength = total_len;
@@ -1227,10 +1214,22 @@ static inline void CCX_ISOTP_RX_StartFirstFrame(CCX_ISOTP_RX_t *Instance, const 
 
     if (Instance->Config.OnReceiveStart != NULL)
     {
+        uint8_t callback_token;
+        /* cppcheck-suppress autoVariables
+         * Scoped callback identity, cleared or invalidated before this function returns.
+         */
+        Instance->CallbackToken = &callback_token;
         Instance->Config.OnReceiveStart(Instance, total_len, Instance->Config.UserData);
+        if (Instance->CallbackToken != &callback_token)
+        {
+            return;
+        }
+        Instance->CallbackToken = NULL;
     }
-
-    CCX_ISOTP_RX_SendFlowControl(Instance, CCX_ISOTP_FC_CTS);
+    if (CCX_ISOTP_RX_SendFlowControl(Instance, CCX_ISOTP_FC_CTS) != CCX_OK)
+    {
+        (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_BUSY);
+    }
 }
 
 static inline void CCX_ISOTP_RX_HandleFirstFrame(CCX_ISOTP_RX_t *Instance, const CCX_message_t *msg)
@@ -1247,6 +1246,11 @@ static inline void CCX_ISOTP_RX_HandleFirstFrame(CCX_ISOTP_RX_t *Instance, const
     frame_format = ISOTP_GetMessageFrameFormat(msg);
     can_dl = ISOTP_GetMessageDataLength(msg);
     sf_max = ISOTP_GetSingleFrameMaxPayload(frame_format, can_dl);
+    if (can_dl < ISOTP_STANDARD_FF_HEADER_SIZE)
+    {
+        (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
+        return;
+    }
     total_len = ISOTP_GetStandardFFDataLength(msg);
 
     if (total_len == 0U)
@@ -1254,40 +1258,26 @@ static inline void CCX_ISOTP_RX_HandleFirstFrame(CCX_ISOTP_RX_t *Instance, const
 #if CCX_ENABLE_CANFD
         if (!ISOTP_IsFDFrameFormat(frame_format))
         {
-            if (Instance->State != CCX_ISOTP_RX_STATE_IDLE)
-            {
-                Instance->State = CCX_ISOTP_RX_STATE_IDLE;
-                ISOTP_ResetRXTransfer(Instance);
-            }
-            if (Instance->Config.OnError != NULL)
-            {
-                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
-            }
+            (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
             return;
         }
 
+        if (can_dl < ISOTP_EXTENDED_FF_HEADER_SIZE)
+        {
+            (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
+            return;
+        }
         total_len = ISOTP_GetExtendedFFDataLength(msg);
         if (can_dl <= ISOTP_EXTENDED_FF_HEADER_SIZE || total_len <= (CCX_ISOTP_Length_t)ISOTP_STANDARD_FF_MAX_LENGTH ||
             total_len > (CCX_ISOTP_Length_t)CCX_ISOTP_MAX_FD_DATA_SIZE)
         {
-            if (Instance->State != CCX_ISOTP_RX_STATE_IDLE)
-            {
-                Instance->State = CCX_ISOTP_RX_STATE_IDLE;
-                ISOTP_ResetRXTransfer(Instance);
-            }
-            if (Instance->Config.OnError != NULL)
-            {
-                Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
-            }
+            (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
             return;
         }
 
         CCX_ISOTP_RX_StartFirstFrame(Instance, msg, total_len, CCX_ISOTP_LENGTH_FORMAT_EXTENDED);
 #else
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
-        }
+        (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
 #endif
         return;
     }
@@ -1297,15 +1287,7 @@ static inline void CCX_ISOTP_RX_HandleFirstFrame(CCX_ISOTP_RX_t *Instance, const
         total_len <= (CCX_ISOTP_Length_t)standard_ff_payload ||
         total_len > (CCX_ISOTP_Length_t)CCX_ISOTP_MAX_CLASSIC_DATA_SIZE)
     {
-        if (Instance->State != CCX_ISOTP_RX_STATE_IDLE)
-        {
-            Instance->State = CCX_ISOTP_RX_STATE_IDLE;
-            ISOTP_ResetRXTransfer(Instance);
-        }
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
-        }
+        (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
         return;
     }
 
@@ -1351,23 +1333,13 @@ static inline void CCX_ISOTP_RX_HandleConsecutiveFrame(CCX_ISOTP_RX_t *Instance,
     sn = ISOTP_GetCFSequenceNumber(msg);
     if (sn != Instance->SequenceNumber)
     {
-        Instance->State = CCX_ISOTP_RX_STATE_IDLE;
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_SEQUENCE, Instance->Config.UserData);
-        }
-        ISOTP_ResetRXTransfer(Instance);
+        (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_SEQUENCE);
         return;
     }
 
     if (!ISOTP_IsValidConsecutiveFrameLength(Instance, msg))
     {
-        Instance->State = CCX_ISOTP_RX_STATE_IDLE;
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_INVALID_ARG, Instance->Config.UserData);
-        }
-        ISOTP_ResetRXTransfer(Instance);
+        (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
         return;
     }
 
@@ -1388,32 +1360,35 @@ static inline void CCX_ISOTP_RX_HandleConsecutiveFrame(CCX_ISOTP_RX_t *Instance,
         bytes_since_last = Instance->RxDataOffset - Instance->LastProgressCallback;
         if (bytes_since_last >= Instance->Config.ProgressCallbackInterval)
         {
-            Instance->Config.OnReceiveProgress(Instance, bytes_since_last, Instance->RxDataLength,
-                                               Instance->Config.UserData);
-            Instance->LastProgressCallback = Instance->RxDataOffset;
+            if (!ISOTP_NotifyRXProgress(Instance, bytes_since_last))
+            {
+                return;
+            }
         }
     }
 
     if (Instance->RxDataOffset >= Instance->RxDataLength)
     {
-        Instance->State = CCX_ISOTP_RX_STATE_IDLE;
-
         if (Instance->Config.OnReceiveProgress != NULL)
         {
             bytes_since_last = Instance->RxDataOffset - Instance->LastProgressCallback;
             if (bytes_since_last > 0U)
             {
-                Instance->Config.OnReceiveProgress(Instance, bytes_since_last, Instance->RxDataLength,
-                                                   Instance->Config.UserData);
+                if (!ISOTP_NotifyRXProgress(Instance, bytes_since_last))
+                {
+                    return;
+                }
             }
         }
 
+        CCX_ISOTP_Length_t completed_length = Instance->RxDataLength;
+        Instance->State = CCX_ISOTP_RX_STATE_IDLE;
+        ISOTP_ResetRXTransfer(Instance);
         if (Instance->Config.OnReceiveComplete != NULL)
         {
-            Instance->Config.OnReceiveComplete(Instance, Instance->Config.RxBuffer, Instance->RxDataLength,
+            Instance->Config.OnReceiveComplete(Instance, Instance->Config.RxBuffer, completed_length,
                                                Instance->Config.UserData);
         }
-        ISOTP_ResetRXTransfer(Instance);
         return;
     }
 
@@ -1423,7 +1398,10 @@ static inline void CCX_ISOTP_RX_HandleConsecutiveFrame(CCX_ISOTP_RX_t *Instance,
         if (Instance->BlockCounter == 0U)
         {
             Instance->BlockCounter = Instance->Config.BS;
-            CCX_ISOTP_RX_SendFlowControl(Instance, CCX_ISOTP_FC_CTS);
+            if (CCX_ISOTP_RX_SendFlowControl(Instance, CCX_ISOTP_FC_CTS) != CCX_OK)
+            {
+                (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_BUSY);
+            }
         }
     }
 }
@@ -1453,6 +1431,11 @@ void CCX_ISOTP_RX_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Msg, 
         return;
     }
 
+    if (!ISOTP_IsValidCANFrame(Msg) || ISOTP_GetMessageDataLength(Msg) == 0U)
+    {
+        (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
+        return;
+    }
     switch (ISOTP_GetPCI(Msg))
     {
     case CCX_ISOTP_PCI_SF:
@@ -1494,12 +1477,7 @@ void CCX_ISOTP_RX_Poll(CCX_ISOTP_RX_t *Instance)
     current_tick = CCX_GetPrimaryTick();
     if (Instance->Config.N_Cr > 0U && (CCX_TIME_t)(current_tick - Instance->LastTick) >= Instance->Config.N_Cr)
     {
-        Instance->State = CCX_ISOTP_RX_STATE_IDLE;
-        if (Instance->Config.OnError != NULL)
-        {
-            Instance->Config.OnError(Instance, CCX_ISOTP_ERROR_TIMEOUT_CF_RX, Instance->Config.UserData);
-        }
-        ISOTP_ResetRXTransfer(Instance);
+        (void)ISOTP_FinishRXError(Instance, CCX_ISOTP_ERROR_TIMEOUT_CF_RX);
     }
 }
 
@@ -1528,6 +1506,14 @@ void CCX_ISOTP_TX_FC_Parser(const CCX_instance_t *CanInstance, CCX_message_t *Ms
         return;
     }
 
+    if (!ISOTP_IsValidCANFrame(Msg) || ISOTP_GetMessageDataLength(Msg) == 0U)
+    {
+        if (Instance->State != CCX_ISOTP_TX_STATE_IDLE)
+        {
+            ISOTP_FinishTXError(Instance, CCX_ISOTP_ERROR_INVALID_ARG);
+        }
+        return;
+    }
     if (ISOTP_GetPCI(Msg) == CCX_ISOTP_PCI_FC)
     {
         CCX_ISOTP_TX_HandleFlowControl(Instance, Msg);

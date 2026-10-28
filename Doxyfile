@@ -1,6 +1,6 @@
 PROJECT_NAME           = "CAN CoreX"
 PROJECT_BRIEF          = "Table-driven CAN, CAN FD, ISO-TP, network simulation, and bus monitoring library"
-PROJECT_NUMBER         = 2.3.1
+PROJECT_NUMBER         = 3.0.0
 
 OUTPUT_DIRECTORY       = docs
 CREATE_SUBDIRS         = NO

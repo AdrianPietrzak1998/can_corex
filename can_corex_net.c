@@ -202,6 +202,10 @@ CCX_net_status_t CCX_net_deinit(CCX_net_t *net)
     }
 
     CCX_net_t *prev = CCX_nets;
+    if (prev == NULL)
+    {
+        return CCX_NET_DOES_NOT_EXISTING;
+    }
     while (prev->next != NULL)
     {
         if (prev->next == net)

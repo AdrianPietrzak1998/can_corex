@@ -103,14 +103,40 @@ uint8_t CCX_FD_LenToDLC(uint8_t len)
 }
 #endif
 
-static inline void CopyBuf(const uint8_t *restrict src, uint8_t *restrict dst, size_t size)
+static uint8_t CCX_IsValidFrame(uint32_t ID, uint8_t IDE_flag, uint8_t DLC
+#if CCX_ENABLE_CANFD
+                                ,
+                                uint8_t FrameFormat
+#endif
+)
 {
-    assert((src != NULL) && (dst != NULL));
-
-    for (size_t i = 0; i < size; i++)
+    if (ID > (IDE_flag ? 0x1FFFFFFFUL : 0x7FFUL))
     {
-        dst[i] = src[i];
+        return 0U;
     }
+#if CCX_ENABLE_CANFD
+    if (FrameFormat > CCX_FRAME_FORMAT_FD_BRS)
+    {
+        return 0U;
+    }
+    return (uint8_t)(FrameFormat != CCX_FRAME_FORMAT_CLASSIC || DLC <= 8U);
+#else
+    return (uint8_t)(DLC <= 8U);
+#endif
+}
+
+static CCX_Status_t CCX_ValidateTXEntry(const CCX_TX_table_t *Entry)
+{
+    if (!CCX_IsValidFrame(Entry->ID, Entry->IDE_flag, Entry->DLC
+#if CCX_ENABLE_CANFD
+                          ,
+                          Entry->FrameFormat
+#endif
+                          ))
+    {
+        return CCX_WRONG_ARG;
+    }
+    return (Entry->DLC > 0U && Entry->Data == NULL) ? CCX_NULL_PTR : CCX_OK;
 }
 
 static uint16_t CCX_GetRingDepth(uint16_t head, uint16_t tail, uint16_t size)
@@ -159,18 +185,15 @@ CCX_Status_t CCX_RX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
     {
         return CCX_NULL_PTR;
     }
+    if (!CCX_IsValidFrame(msg->ID, msg->IDE_flag, msg->DLC
 #if CCX_ENABLE_CANFD
-    if (msg->FrameFormat == CCX_FRAME_FORMAT_CLASSIC && msg->DLC > 8)
-    {
-        return CCX_WRONG_ARG;
-    }
-    /* FD frames: DLC 0-15 all valid */
-#else
-    if (msg->DLC > 8)
-    {
-        return CCX_WRONG_ARG;
-    }
+                          ,
+                          msg->FrameFormat
 #endif
+                          ))
+    {
+        return CCX_WRONG_ARG;
+    }
 
     uint16_t next_head = Instance->RxHead + 1;
     if (next_head >= CCX_RX_BUFFER_SIZE)
@@ -217,7 +240,6 @@ static inline uint16_t CCX_Hash(uint32_t ID)
 static void CCX_RX_BuildHash(CCX_instance_t *Instance)
 {
     assert(Instance != NULL);
-    assert(Instance->RxTableSize < CCX_RX_HASH_SIZE);
 
     /* Clear hash table */
     for (uint16_t i = 0; i < CCX_RX_HASH_SIZE; i++)
@@ -225,15 +247,25 @@ static void CCX_RX_BuildHash(CCX_instance_t *Instance)
         Instance->RxHashTable[i] = HASH_EMPTY;
     }
 
+    if (Instance->CCX_RX_table == NULL || Instance->RxTableSize > CCX_RX_HASH_SIZE)
+    {
+        return;
+    }
+
     /* Build hash - linear probing for collisions */
     for (uint16_t i = 0; i < Instance->RxTableSize; i++)
     {
         uint16_t hash = CCX_Hash(Instance->CCX_RX_table[i].ID);
 
-        /* Linear probing until we find an empty slot */
-        while (Instance->RxHashTable[hash] != HASH_EMPTY)
+        uint16_t probes = 0U;
+        while (Instance->RxHashTable[hash] != HASH_EMPTY && probes < CCX_RX_HASH_SIZE)
         {
             hash = (hash + 1) % CCX_RX_HASH_SIZE;
+            probes++;
+        }
+        if (probes == CCX_RX_HASH_SIZE)
+        {
+            return;
         }
 
         Instance->RxHashTable[hash] = i;
@@ -292,7 +324,7 @@ static inline CCX_MsgRegStatus_t CCX_RX_MsgFromTables(CCX_instance_t *Instance, 
 {
     assert(Instance != NULL);
 
-    if (NULL == Instance->CCX_RX_table)
+    if (NULL == Instance->CCX_RX_table || Instance->RxTableSize == 0U)
     {
         return CCX_MSG_UNREG;
     }
@@ -312,7 +344,7 @@ static inline CCX_MsgRegStatus_t CCX_RX_MsgFromTables(CCX_instance_t *Instance, 
 
         uint16_t index = Instance->RxHashTable[hash];
 
-        if (Instance->CCX_RX_table[index].ID == Msg->ID)
+        if (index < Instance->RxTableSize && Instance->CCX_RX_table[index].ID == Msg->ID)
         {
             /* ID match - check DLC and IDE */
             CCX_MsgRegStatus_t result = CCX_RX_ProcessMatch(Instance, Msg, index);
@@ -342,14 +374,18 @@ static inline CCX_MsgRegStatus_t CCX_RX_MsgFromTables(CCX_instance_t *Instance, 
         {
             left = mid + 1;
         }
-        else if (Instance->CCX_RX_table[mid].ID > Msg->ID)
+        else
         {
             right = mid;
         }
-        else
+    }
+
+    /* Start at the first matching ID to preserve table-order precedence. */
+    for (uint16_t i = left; i < Instance->RxTableSize && Instance->CCX_RX_table[i].ID == Msg->ID; i++)
+    {
+        if (CCX_RX_ProcessMatch(Instance, Msg, i) == CCX_MSG_REG)
         {
-            /* ID match - check DLC and IDE */
-            return CCX_RX_ProcessMatch(Instance, Msg, mid);
+            return CCX_MSG_REG;
         }
     }
 
@@ -422,18 +458,19 @@ CCX_Status_t CCX_TX_PushMsg(CCX_instance_t *Instance, const CCX_message_t *msg)
     {
         return CCX_NULL_PTR;
     }
+    if (!CCX_IsValidFrame(msg->ID, msg->IDE_flag, msg->DLC
 #if CCX_ENABLE_CANFD
-    if (msg->FrameFormat == CCX_FRAME_FORMAT_CLASSIC && msg->DLC > 8)
-    {
-        return CCX_WRONG_ARG;
-    }
-    /* FD frames: DLC 0-15 all valid */
-#else
-    if (msg->DLC > 8)
-    {
-        return CCX_WRONG_ARG;
-    }
+                          ,
+                          msg->FrameFormat
 #endif
+                          ))
+    {
+        return CCX_WRONG_ARG;
+    }
+    if (Instance->SendFunction == NULL || Instance->BusCheck == NULL)
+    {
+        return CCX_NULL_PTR;
+    }
 
     uint16_t next_head = Instance->TxHead + 1;
     if (next_head >= CCX_TX_BUFFER_SIZE)
@@ -545,7 +582,7 @@ void CCX_Reset(CCX_instance_t *Instance)
     CCX_ResetGlobalStats(Instance);
 }
 
-static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
+static CCX_Status_t CCX_TX_MsgFromTables(CCX_instance_t *Instance)
 {
     assert(NULL != Instance);
 #if CCX_ENABLE_CANFD
@@ -558,6 +595,11 @@ static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
 
     for (uint16_t i = 0; i < Instance->TxTableSize; i++)
     {
+        CCX_Status_t status = CCX_ValidateTXEntry(&Instance->CCX_TX_table[i]);
+        if (status != CCX_OK)
+        {
+            return status;
+        }
         CCX_TIME_t elapsed = (CCX_TIME_t)(CCX_GetPrimaryTick() - Instance->CCX_TX_table[i].LastTick);
         if (elapsed >= Instance->CCX_TX_table[i].SendFreq)
         {
@@ -570,7 +612,10 @@ static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
 #else
             uint8_t len = Instance->CCX_TX_table[i].DLC;
 #endif
-            CopyBuf(Instance->CCX_TX_table[i].Data, Tmp, len);
+            if (len > 0U)
+            {
+                memcpy(Tmp, Instance->CCX_TX_table[i].Data, len);
+            }
             if (NULL != Instance->CCX_TX_table[i].Parser)
             {
                 Instance->CCX_TX_table[i].Parser(Instance, Tmp, i, Instance->CCX_TX_table[i].UserData);
@@ -594,13 +639,23 @@ static inline void CCX_TX_MsgFromTables(CCX_instance_t *Instance)
             }
         }
     }
+    return CCX_OK;
 }
 
-static inline void CCX_TX_Poll(CCX_instance_t *Instance)
+static CCX_Status_t CCX_TX_Poll(CCX_instance_t *Instance)
 {
-    assert((NULL != Instance) && (NULL != Instance->BusCheck));
+    assert(Instance != NULL);
 
-    CCX_TX_MsgFromTables(Instance);
+    if (Instance->BusCheck == NULL || Instance->SendFunction == NULL)
+    {
+        return (Instance->TxTableSize == 0U && Instance->TxHead == Instance->TxTail) ? CCX_OK : CCX_NULL_PTR;
+    }
+
+    CCX_Status_t status = CCX_TX_MsgFromTables(Instance);
+    if (status != CCX_OK)
+    {
+        return status;
+    }
 
     while ((Instance->TxHead != Instance->TxTail) && (Instance->BusCheck(Instance) == CCX_BUS_FREE))
     {
@@ -613,6 +668,7 @@ static inline void CCX_TX_Poll(CCX_instance_t *Instance)
         assert(NULL != Instance->SendFunction);
         Instance->SendFunction(Instance, &Instance->TxBuf[Instance->TxTail]);
     }
+    return CCX_OK;
 }
 
 CCX_Status_t CCX_Poll(CCX_instance_t *Instance)
@@ -629,9 +685,7 @@ CCX_Status_t CCX_Poll(CCX_instance_t *Instance)
     }
 
     CCX_RX_Poll(Instance);
-    CCX_TX_Poll(Instance);
-
-    return CCX_OK;
+    return CCX_TX_Poll(Instance);
 }
 
 CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CCX_TX_table_t *CCX_TX_table,
@@ -650,6 +704,48 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
     if (CCX_IsPrimaryTickRegistered() == 0U)
     {
         return CCX_MISSING_TIMEBASE;
+    }
+
+    if ((SendFunction == NULL) != (BusCheck == NULL))
+    {
+        return CCX_NULL_PTR;
+    }
+#if defined(CCX_RX_SEARCH_HASH)
+    if (RxTableSize > CCX_RX_HASH_SIZE)
+    {
+        return CCX_WRONG_ARG;
+    }
+#endif
+    for (uint16_t i = 0U; i < TxTableSize; i++)
+    {
+        CCX_Status_t status = CCX_ValidateTXEntry(&CCX_TX_table[i]);
+        if (status != CCX_OK)
+        {
+            return status;
+        }
+    }
+    for (uint16_t i = 0U; i < RxTableSize; i++)
+    {
+        uint8_t dlc = CCX_RX_table[i].DLC;
+        if (!CCX_IsValidFrame(CCX_RX_table[i].ID, CCX_RX_table[i].IDE_flag, dlc == CCX_DLC_ANY ? 0U : dlc
+#if CCX_ENABLE_CANFD
+                              ,
+                              CCX_RX_table[i].FrameFormat
+#endif
+                              )
+#if CCX_ENABLE_CANFD
+            || dlc > CCX_DLC_ANY
+#endif
+        )
+        {
+            return CCX_WRONG_ARG;
+        }
+#if defined(CCX_RX_SEARCH_BINARY)
+        if (i > 0U && CCX_RX_table[i - 1U].ID > CCX_RX_table[i].ID)
+        {
+            return CCX_WRONG_ARG;
+        }
+#endif
     }
 
     Instance->CCX_TX_table = CCX_TX_table;
@@ -700,10 +796,7 @@ CCX_Status_t CCX_Init(CCX_instance_t *Instance, CCX_RX_table_t *CCX_RX_table, CC
 
 #if defined(CCX_RX_SEARCH_HASH)
     /* Build hash table for RX messages */
-    if (Instance->CCX_RX_table != NULL && RxTableSize > 0)
-    {
-        CCX_RX_BuildHash(Instance);
-    }
+    CCX_RX_BuildHash(Instance);
 #endif
 
     return CCX_OK;
@@ -750,7 +843,7 @@ void CCX_OnMessageTransmitted(CCX_instance_t *Instance, const CCX_message_t *msg
 void CCX_RX_RebuildHash(CCX_instance_t *Instance)
 {
 #if defined(CCX_RX_SEARCH_HASH)
-    if (Instance != NULL && Instance->CCX_RX_table != NULL && Instance->RxTableSize > 0)
+    if (Instance != NULL)
     {
         CCX_RX_BuildHash(Instance);
     }

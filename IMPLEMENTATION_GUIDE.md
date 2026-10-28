@@ -1,6 +1,6 @@
 # CAN CoreX Implementation Guide
 
-**Version:** 2.3.1  
+**Version:** 3.0.0
 **Author:** Adrian Pietrzak  
 **Date:** April 2026
 
@@ -3202,7 +3202,9 @@ This implementation guide covers:
 - Use `CCX_Init` for all instances — frame format is per-message/per-entry via `CCX_frame_format_t`, not per-instance
 - Set `FrameFormat` in RX/TX table aggregate initializers (e.g. `.FrameFormat = CCX_FRAME_FORMAT_FD_BRS`); `CCX_FRAME_FORMAT_CLASSIC=0` is the C zero-init default; field-by-field tables require `memset(table, 0, sizeof(table))` before population
 - In `can_corex_isotp`, payload-length limits are per ISO-TP instance: classic stays at `4095`, FD uses `CCX_ISOTP_MAX_FD_DATA_SIZE`; FD TX sessions require a valid `TxDL`, while FD RX sessions use `FC_TxDL` for transmitted Flow Control frames (`8/12/16/20/24/32/48/64`)
-- ISO-TP header selection is based on PDU length before padding; classic pads to `8`, FD pads to `TxDL` / `FC_TxDL` as appropriate
+- ISO-TP SF header selection follows final CAN_DL: an FD SF longer than 8 bytes uses the two-byte escape, including short padded PDUs; classic pads to `8`, FD pads to `TxDL` / `FC_TxDL`
+- ISO-TP Init fully initializes the instance without prior zeroing. Calling Init again discards an active session without callbacks; queued CAN frames are not removed. A failed Init leaves the instance disabled.
+- A failed FC enqueue terminates RX with `CCX_ISOTP_ERROR_BUSY`; RX start/progress callbacks may Abort or Init to cancel the interrupted parser operation.
 - Current ISO-TP lifecycle helpers include `CCX_ISOTP_TX_Abort()`, `CCX_ISOTP_RX_Abort()`, `OnReceiveStart`, and delta-based `OnReceiveProgress`
 - ISO-TP timeout diagnostics are phase-specific (`TIMEOUT_FC`, `TIMEOUT_CF_TX`, `TIMEOUT_CF_RX`, `WAIT_EXCEEDED`); `CCX_ISOTP_ERROR_TIMEOUT` remains a legacy alias
 - ISO-TP enforces `N_Bs`, `N_Cs`, and `N_Cr` in the primary timebase; sub-millisecond `STmin` uses HR only when enabled
